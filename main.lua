@@ -219,10 +219,13 @@ local function performScan()
             
             -- Escanear Scripts
             if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                local fullPath = obj:GetFullName()
                 table.insert(scannedData.scripts, {
                     name = obj.Name,
                     class = obj.ClassName,
-                    parent = obj.Parent and obj.Parent.Name or "nil"
+                    parent = obj.Parent and obj.Parent.Name or "nil",
+                    fullPath = fullPath,
+                    enabled = obj.Enabled or false
                 })
             end
         end)
@@ -329,6 +332,116 @@ local function getScriptReport()
     end
     
     return report
+end
+
+local function getFullScriptExport()
+    local export = "═══════════════════════════════════════\n"
+    export = export .. "📜 FULL SCRIPT EXPORT - Parking Game\n"
+    export = export .. "═══════════════════════════════════════\n\n"
+    export = export .. string.format("Total Scripts: %d\n", #scannedData.scripts)
+    export = export .. string.format("Scan Time: %s\n", scanStats.lastScan)
+    export = export .. string.format("Total Objects Scanned: %d\n\n", scanStats.totalObjects)
+    export = export .. "═══════════════════════════════════════\n\n"
+    
+    for i, script in ipairs(scannedData.scripts) do
+        export = export .. string.format(
+            "Script #%d\n" ..
+            "├─ Name: %s\n" ..
+            "├─ Class: %s\n" ..
+            "├─ Parent: %s\n" ..
+            "└─ Full Path: Workspace.%s\n\n",
+            i, script.name, script.class, script.parent, script.fullPath or "Unknown"
+        )
+    end
+    
+    return export
+end
+
+local function getFullObstacleExport()
+    local export = "═══════════════════════════════════════\n"
+    export = export .. "🚧 FULL OBSTACLE EXPORT\n"
+    export = export .. "═══════════════════════════════════════\n\n"
+    export = export .. string.format("Total Obstacles: %d\n\n", #scannedData.obstacles)
+    
+    for i, obs in ipairs(scannedData.obstacles) do
+        export = export .. string.format(
+            "Obstacle #%d: %s\n" ..
+            "├─ Position: Vector3.new(%.2f, %.2f, %.2f)\n" ..
+            "├─ Size: Vector3.new(%.2f, %.2f, %.2f)\n" ..
+            "├─ Color: Color3.fromRGB(%.0f, %.0f, %.0f)\n" ..
+            "└─ Material: %s\n\n",
+            i, obs.Name,
+            obs.Position.X, obs.Position.Y, obs.Position.Z,
+            obs.Size.X, obs.Size.Y, obs.Size.Z,
+            obs.Color.R * 255, obs.Color.G * 255, obs.Color.B * 255,
+            obs.Material.Name
+        )
+    end
+    
+    return export
+end
+
+local function getFullParkingExport()
+    local export = "═══════════════════════════════════════\n"
+    export = export .. "🅿️ FULL PARKING ZONES EXPORT\n"
+    export = export .. "═══════════════════════════════════════\n\n"
+    export = export .. string.format("Total Parking Zones: %d\n\n", #scannedData.parkingZones)
+    
+    for i, zone in ipairs(scannedData.parkingZones) do
+        export = export .. string.format(
+            "Zone #%d: %s\n" ..
+            "├─ Position: Vector3.new(%.2f, %.2f, %.2f)\n" ..
+            "├─ Size: Vector3.new(%.2f, %.2f, %.2f)\n" ..
+            "├─ Color: Color3.fromRGB(%.0f, %.0f, %.0f)\n" ..
+            "└─ CFrame: CFrame.new(%.2f, %.2f, %.2f)\n\n",
+            i, zone.Name,
+            zone.Position.X, zone.Position.Y, zone.Position.Z,
+            zone.Size.X, zone.Size.Y, zone.Size.Z,
+            zone.Color.R * 255, zone.Color.G * 255, zone.Color.B * 255,
+            zone.CFrame.Position.X, zone.CFrame.Position.Y, zone.CFrame.Position.Z
+        )
+    end
+    
+    return export
+end
+
+local function getAllDataExport()
+    local export = "═══════════════════════════════════════\n"
+    export = export .. "🔍 COMPLETE MAP DATA EXPORT\n"
+    export = export .. "Created by: Gael Fonzar Scanner\n"
+    export = export .. "═══════════════════════════════════════\n\n"
+    export = export .. getBasicReport() .. "\n\n"
+    export = export .. "═══════════════════════════════════════\n\n"
+    
+    -- Scripts
+    export = export .. "📜 SCRIPTS (" .. #scannedData.scripts .. "):\n"
+    for i, script in ipairs(scannedData.scripts) do
+        export = export .. string.format("%d. [%s] %s (Parent: %s)\n", 
+            i, script.class, script.name, script.parent)
+    end
+    
+    export = export .. "\n═══════════════════════════════════════\n\n"
+    
+    -- Parking Zones (primeras 10)
+    export = export .. "🅿️ PARKING ZONES (Top 10):\n"
+    for i = 1, math.min(10, #scannedData.parkingZones) do
+        local zone = scannedData.parkingZones[i]
+        export = export .. string.format("%d. %s - Pos(%.0f, %.0f, %.0f)\n", 
+            i, zone.Name, zone.Position.X, zone.Position.Y, zone.Position.Z)
+    end
+    
+    export = export .. "\n═══════════════════════════════════════\n\n"
+    
+    -- Vehicles
+    export = export .. "🚗 VEHICLES (" .. #scannedData.vehicles .. "):\n"
+    for i, vehicle in ipairs(scannedData.vehicles) do
+        export = export .. string.format("%d. %s\n", i, vehicle.Name)
+    end
+    
+    export = export .. "\n═══════════════════════════════════════\n"
+    export = export .. "End of Export\n"
+    
+    return export
 end
 
 -- ═══════════════════════════════════════
@@ -479,8 +592,92 @@ Tabs.Results:AddButton({
 Tabs.Results:AddSection("Exportar Datos")
 
 Tabs.Results:AddButton({
-    Title = "📋 Copiar al Portapapeles",
-    Description = "Copia el reporte completo",
+    Title = "📋 Copiar Reporte Completo",
+    Description = "Copia TODO al portapapeles",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
+            })
+        else
+            setclipboard(getAllDataExport())
+            Fluent:Notify({
+                Title = "✅ Copiado!",
+                Content = "TODOS los datos copiados al portapapeles",
+                Duration = 3
+            })
+        end
+    end
+})
+
+Tabs.Results:AddButton({
+    Title = "📜 Copiar Solo Scripts",
+    Description = "Exporta solo los scripts detectados",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
+            })
+        else
+            setclipboard(getFullScriptExport())
+            Fluent:Notify({
+                Title = "✅ Scripts Copiados!",
+                Content = string.format("%d scripts exportados", #scannedData.scripts),
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Results:AddButton({
+    Title = "🚧 Copiar Solo Obstáculos",
+    Description = "Exporta obstáculos con posiciones",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
+            })
+        else
+            setclipboard(getFullObstacleExport())
+            Fluent:Notify({
+                Title = "✅ Obstáculos Copiados!",
+                Content = string.format("%d obstáculos exportados", #scannedData.obstacles),
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Results:AddButton({
+    Title = "🅿️ Copiar Zonas de Parking",
+    Description = "Exporta zonas con coordenadas",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
+            })
+        else
+            setclipboard(getFullParkingExport())
+            Fluent:Notify({
+                Title = "✅ Parking Copiado!",
+                Content = string.format("%d zonas exportadas", #scannedData.parkingZones),
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Results:AddButton({
+    Title = "📊 Copiar Solo Resumen",
+    Description = "Estadísticas básicas",
     Callback = function()
         if scanStats.lastScan == "Never" then
             Fluent:Notify({
@@ -491,8 +688,8 @@ Tabs.Results:AddButton({
         else
             setclipboard(getBasicReport())
             Fluent:Notify({
-                Title = "✅ Copiado!",
-                Content = "Reporte copiado al portapapeles",
+                Title = "✅ Resumen Copiado!",
+                Content = "Estadísticas copiadas",
                 Duration = 2
             })
         end
@@ -558,6 +755,62 @@ Tabs.Details:AddButton({
             Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
         else
             ScriptDetailParagraph:SetDesc(getScriptReport())
+        end
+    end
+})
+
+Tabs.Details:AddButton({
+    Title = "📜 Copiar Scripts Completos",
+    Description = "Exporta TODOS los scripts con rutas",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
+        else
+            setclipboard(getFullScriptExport())
+            Fluent:Notify({
+                Title = "✅ Scripts Exportados!",
+                Content = string.format("%d scripts con rutas completas", #scannedData.scripts),
+                Duration = 3
+            })
+        end
+    end
+})
+
+Tabs.Details:AddSection("Análisis Avanzado")
+
+Tabs.Details:AddButton({
+    Title = "🔍 Copiar Datos RAW (JSON)",
+    Description = "Exporta datos sin formato para análisis",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
+        else
+            local rawData = string.format(
+                "{\n" ..
+                '  "obstacles": %d,\n' ..
+                '  "parkingZones": %d,\n' ..
+                '  "vehicles": %d,\n' ..
+                '  "scripts": %d,\n' ..
+                '  "checkpoints": %d,\n' ..
+                '  "collectibles": %d,\n' ..
+                '  "totalObjects": %d,\n' ..
+                '  "scanTime": %s\n' ..
+                "}",
+                #scannedData.obstacles,
+                #scannedData.parkingZones,
+                #scannedData.vehicles,
+                #scannedData.scripts,
+                #scannedData.checkpoints,
+                #scannedData.collectibles,
+                scanStats.totalObjects,
+                scanStats.scanTime
+            )
+            setclipboard(rawData)
+            Fluent:Notify({
+                Title = "✅ JSON Copiado!",
+                Content = "Datos en formato JSON",
+                Duration = 2
+            })
         end
     end
 })
