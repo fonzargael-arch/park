@@ -1,10 +1,9 @@
 --[[
     ═══════════════════════════════════════
-    🅿️ PARKING GAME NOCLIP
+    🔍 PARKING GAME SCANNER v1.0
     ═══════════════════════════════════════
     Created by: Gael Fonzar
-    Para: Estaciona un coche 🅿️
-    Función: Atraviesa conos, barreras y obstáculos
+    Solo Scanner - Analiza el mapa completo
     ═══════════════════════════════════════
 ]]
 
@@ -13,279 +12,334 @@ local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/
 
 -- Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 
--- Variables
-local noclipEnabled = false
-local autoWinEnabled = false
-local noclipConnection = nil
-local originalProperties = {}
-local processedParts = {}
-
--- Lista de nombres de obstáculos en juegos de estacionamiento
-local obstacleKeywords = {
-    -- Conos y barreras
-    "Cone", "cone", "cono", "Cono", "TrafficCone",
-    "Barrier", "barrier", "barrera", "Barrera",
-    "Fence", "fence", "valla",
-    
-    -- Obstáculos generales
-    "Obstacle", "obstacle", "obstaculo",
-    "Block", "block", "bloque",
-    "Wall", "wall", "muro", "Muro",
-    
-    -- Detectores de colisión
-    "Damage", "damage", "Hit", "hit",
-    "Collision", "collision",
-    "Detect", "detect",
-    
-    -- Otros objetos
-    "Hydrant", "hydrant", "hidrante",
-    "Pole", "pole", "poste",
-    "Sign", "sign", "señal",
-    "Trash", "trash", "basura",
-    "Cart", "cart", "carrito"
+-- Variables de Escaneo
+local scannedData = {
+    obstacles = {},
+    parkingZones = {},
+    vehicles = {},
+    checkpoints = {},
+    collectibles = {},
+    damageZones = {},
+    teleporters = {},
+    scripts = {},
+    allParts = {}
 }
 
--- Función para verificar si un objeto es un obstáculo
+local scanStats = {
+    totalObjects = 0,
+    scanTime = 0,
+    lastScan = "Never"
+}
+
+-- ═══════════════════════════════════════
+-- 🔍 FUNCIONES DE IDENTIFICACIÓN
+-- ═══════════════════════════════════════
+
 local function isObstacle(part)
-    if not part:IsA("BasePart") then return false end
+    if not part or not part:IsA("BasePart") then return false end
+    if part.Name == "Floor" or part.Name == "Ground" or part.Name == "Baseplate" then return false end
     
-    -- Ignorar el suelo y paredes principales
-    if part.Name == "Floor" or part.Name == "Ground" or part.Name == "Baseplate" then
-        return false
-    end
+    local keywords = {
+        "Cone", "cone", "cono", 
+        "Barrier", "barrier", "barrera",
+        "Obstacle", "obstacle", "obstaculo",
+        "Hazard", "hazard", "peligro",
+        "Block", "block", "bloque",
+        "Wall", "wall", "muro",
+        "Fence", "fence", "valla"
+    }
     
-    -- Verificar por nombre
     local partName = part.Name:lower()
-    for _, keyword in ipairs(obstacleKeywords) do
-        if string.find(partName, keyword:lower()) then
-            return true
+    for _, keyword in ipairs(keywords) do
+        if string.find(partName, keyword:lower()) then 
+            return true 
         end
     end
     
-    -- Verificar por parent (carpetas de obstáculos)
-    if part.Parent and (
-        part.Parent.Name:find("Obstacle") or 
-        part.Parent.Name:find("Hazard") or
-        part.Parent.Name:find("Cone") or
-        part.Parent.Name:find("Barrier")
-    ) then
-        return true
-    end
-    
-    -- Verificar por color (conos naranjas/rojos/amarillos)
+    -- Detectar por color (conos naranjas/rojos)
     local color = part.Color
-    if (color.R > 0.7 and color.G < 0.5) or -- Rojo/Naranja
-       (color.R > 0.7 and color.G > 0.6 and color.B < 0.3) then -- Amarillo
-        return true
-    end
-    
-    -- Verificar si tiene TouchEnded o Touched (detectores de daño)
-    if #part:GetConnections() > 0 then
+    if (color.R > 0.7 and color.G < 0.5) or 
+       (color.R > 0.7 and color.G > 0.6 and color.B < 0.3) then
         return true
     end
     
     return false
 end
 
--- Función para obtener el vehículo actual
-local function getVehicle()
-    local char = player.Character
-    if not char then return nil end
+local function isParkingZone(part)
+    if not part or not part:IsA("BasePart") then return false end
     
-    -- Método 1: Buscar por SeatPart
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if humanoid and humanoid.SeatPart then
-        local vehicle = humanoid.SeatPart.Parent
-        return vehicle
-    end
-    
-    -- Método 2: Buscar en Workspace por el modelo del carro
-    for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:FindFirstChild("VehicleSeat") then
-            local seat = obj:FindFirstChild("VehicleSeat")
-            if seat.Occupant and seat.Occupant.Parent == char then
-                return obj
-            end
+    local keywords = {"Park", "park", "Goal", "goal", "Target", "target", "Win", "win", "Finish", "finish"}
+    for _, keyword in ipairs(keywords) do
+        if string.find(part.Name, keyword) then 
+            return true 
         end
     end
     
-    -- Método 3: Buscar carpeta de vehículos
-    local vehiclesFolder = Workspace:FindFirstChild("Vehicles") or Workspace:FindFirstChild("Cars")
-    if vehiclesFolder then
-        for _, vehicle in pairs(vehiclesFolder:GetChildren()) do
-            if vehicle:IsA("Model") then
-                local seat = vehicle:FindFirstChild("VehicleSeat") or vehicle:FindFirstChild("DriveSeat")
-                if seat and seat:IsA("VehicleSeat") and seat.Occupant then
-                    if seat.Occupant.Parent == char then
-                        return vehicle
-                    end
-                end
-            end
-        end
+    -- Detectar por color verde
+    if part.Color == Color3.fromRGB(0, 255, 0) or 
+       part.BrickColor.Name == "Lime green" or
+       part.BrickColor.Name == "Bright green" then
+        return true
     end
     
-    return nil
+    return false
 end
 
--- Función para hacer noclip al vehículo
-local function enableVehicleNoclip()
-    local vehicle = getVehicle()
-    if not vehicle then return end
-    
-    for _, part in pairs(vehicle:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "VehicleSeat" and part.Name ~= "DriveSeat" then
-            if not originalProperties[part] then
-                originalProperties[part] = {
-                    CanCollide = part.CanCollide,
-                    Massless = part.Massless
-                }
-            end
-            part.CanCollide = false
-            part.Massless = true -- Evita físicas raras
-        end
-    end
+local function isVehicle(model)
+    if not model or not model:IsA("Model") then return false end
+    return model:FindFirstChild("VehicleSeat") or model:FindFirstChild("DriveSeat")
 end
 
--- Función para hacer noclip a obstáculos
-local function noclipObstacles()
-    -- Buscar en Workspace
+local function isCollectible(part)
+    if not part or not part:IsA("BasePart") then return false end
+    
+    local keywords = {"Coin", "coin", "Money", "money", "Cash", "cash", "Dollar", "dollar"}
+    for _, keyword in ipairs(keywords) do
+        if string.find(part.Name, keyword) then 
+            return true 
+        end
+    end
+    
+    -- Detectar por color amarillo/dorado
+    local color = part.Color
+    if (color.R > 0.8 and color.G > 0.7 and color.B < 0.3) then
+        return true
+    end
+    
+    return false
+end
+
+local function isDamageZone(part)
+    if not part or not part:IsA("BasePart") then return false end
+    
+    local keywords = {"Damage", "damage", "Kill", "kill", "Death", "death", "Lava", "lava"}
+    for _, keyword in ipairs(keywords) do
+        if string.find(part.Name, keyword) then 
+            return true 
+        end
+    end
+    
+    -- Detectar zonas rojas
+    if part.Color == Color3.fromRGB(255, 0, 0) or part.BrickColor.Name == "Really red" then
+        return true
+    end
+    
+    return false
+end
+
+local function isCheckpoint(part)
+    if not part or not part:IsA("BasePart") then return false end
+    
+    local keywords = {"Checkpoint", "checkpoint", "Point", "point", "Stage", "stage"}
+    for _, keyword in ipairs(keywords) do
+        if string.find(part.Name, keyword) then 
+            return true 
+        end
+    end
+    
+    return false
+end
+
+local function isTeleporter(part)
+    if not part or not part:IsA("BasePart") then return false end
+    
+    local keywords = {"Teleport", "teleport", "Portal", "portal", "Warp", "warp"}
+    for _, keyword in ipairs(keywords) do
+        if string.find(part.Name, keyword) then 
+            return true 
+        end
+    end
+    
+    return false
+end
+
+-- ═══════════════════════════════════════
+-- 🔍 FUNCIÓN DE ESCANEO PRINCIPAL
+-- ═══════════════════════════════════════
+
+local function performScan()
+    local startTime = tick()
+    
+    -- Resetear datos
+    scannedData = {
+        obstacles = {},
+        parkingZones = {},
+        vehicles = {},
+        checkpoints = {},
+        collectibles = {},
+        damageZones = {},
+        teleporters = {},
+        scripts = {},
+        allParts = {}
+    }
+    
+    scanStats.totalObjects = 0
+    
+    -- Escanear todo el Workspace
     for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and isObstacle(obj) and not processedParts[obj] then
-            originalProperties[obj] = {
-                CanCollide = obj.CanCollide,
-                Transparency = obj.Transparency
-            }
-            obj.CanCollide = false
-            obj.Transparency = math.min(obj.Transparency + 0.3, 0.8) -- Semi-transparente
-            processedParts[obj] = true
-        end
-    end
-end
-
--- Función principal de noclip
-local function startNoclip()
-    if noclipConnection then
-        noclipConnection:Disconnect()
-    end
-    
-    -- Hacer noclip inicial a todos los obstáculos
-    noclipObstacles()
-    
-    noclipConnection = RunService.Heartbeat:Connect(function()
-        if not noclipEnabled then
-            if noclipConnection then
-                noclipConnection:Disconnect()
-                noclipConnection = nil
-            end
-            return
-        end
+        scanStats.totalObjects = scanStats.totalObjects + 1
         
-        -- Noclip del vehículo cada frame
-        enableVehicleNoclip()
-    end)
-    
-    -- Conectar evento para nuevos obstáculos
-    Workspace.DescendantAdded:Connect(function(obj)
-        if noclipEnabled and obj:IsA("BasePart") and isObstacle(obj) then
-            task.wait(0.1)
-            if not originalProperties[obj] then
-                originalProperties[obj] = {
-                    CanCollide = obj.CanCollide,
-                    Transparency = obj.Transparency
-                }
+        pcall(function()
+            -- Escanear BaseParts
+            if obj:IsA("BasePart") then
+                table.insert(scannedData.allParts, {
+                    name = obj.Name,
+                    class = obj.ClassName,
+                    position = obj.Position,
+                    size = obj.Size,
+                    color = obj.Color,
+                    material = obj.Material.Name
+                })
+                
+                if isObstacle(obj) then
+                    table.insert(scannedData.obstacles, obj)
+                elseif isParkingZone(obj) then
+                    table.insert(scannedData.parkingZones, obj)
+                elseif isCollectible(obj) then
+                    table.insert(scannedData.collectibles, obj)
+                elseif isDamageZone(obj) then
+                    table.insert(scannedData.damageZones, obj)
+                elseif isCheckpoint(obj) then
+                    table.insert(scannedData.checkpoints, obj)
+                elseif isTeleporter(obj) then
+                    table.insert(scannedData.teleporters, obj)
+                end
             end
-            obj.CanCollide = false
-            obj.Transparency = math.min(obj.Transparency + 0.3, 0.8)
-            processedParts[obj] = true
-        end
-    end)
+            
+            -- Escanear Modelos (Vehículos)
+            if obj:IsA("Model") and isVehicle(obj) then
+                table.insert(scannedData.vehicles, obj)
+            end
+            
+            -- Escanear Scripts
+            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                table.insert(scannedData.scripts, {
+                    name = obj.Name,
+                    class = obj.ClassName,
+                    parent = obj.Parent and obj.Parent.Name or "nil"
+                })
+            end
+        end)
+    end
+    
+    scanStats.scanTime = math.floor((tick() - startTime) * 1000) / 1000
+    scanStats.lastScan = os.date("%H:%M:%S")
+    
+    return scannedData
 end
 
-local function stopNoclip()
-    noclipEnabled = false
-    
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
-    end
-    
-    -- Restaurar propiedades
-    for obj, props in pairs(originalProperties) do
-        if obj and obj.Parent then
-            pcall(function()
-                obj.CanCollide = props.CanCollide
-                if props.Transparency then
-                    obj.Transparency = props.Transparency
-                end
-                if props.Massless ~= nil then
-                    obj.Massless = props.Massless
-                end
-            end)
-        end
-    end
-    originalProperties = {}
-    processedParts = {}
+-- ═══════════════════════════════════════
+-- 📊 FUNCIONES DE REPORTE
+-- ═══════════════════════════════════════
+
+local function getBasicReport()
+    return string.format(
+        "📊 SCAN REPORT\n\n" ..
+        "🚧 Obstáculos: %d\n" ..
+        "🅿️ Zonas de Estacionamiento: %d\n" ..
+        "🚗 Vehículos: %d\n" ..
+        "📍 Checkpoints: %d\n" ..
+        "💰 Coleccionables: %d\n" ..
+        "💀 Zonas de Daño: %d\n" ..
+        "🌀 Teleportadores: %d\n" ..
+        "📜 Scripts: %d\n\n" ..
+        "⏱️ Tiempo: %ss\n" ..
+        "🔢 Total Objetos: %d",
+        #scannedData.obstacles,
+        #scannedData.parkingZones,
+        #scannedData.vehicles,
+        #scannedData.checkpoints,
+        #scannedData.collectibles,
+        #scannedData.damageZones,
+        #scannedData.teleporters,
+        #scannedData.scripts,
+        scanStats.scanTime,
+        scanStats.totalObjects
+    )
 end
 
--- Función para auto-ganar (teleport al punto de estacionamiento)
-local function autoWin()
-    local vehicle = getVehicle()
-    if not vehicle then
-        Fluent:Notify({
-            Title = "❌ Error",
-            Content = "No estás en un vehículo!",
-            Duration = 2
-        })
-        return
+local function getDetailedObstacleReport()
+    local report = "🚧 OBSTÁCULOS DETECTADOS:\n\n"
+    
+    if #scannedData.obstacles == 0 then
+        return report .. "No se encontraron obstáculos"
     end
     
-    -- Buscar el punto de estacionamiento (zona verde)
-    local parkingZone = nil
-    
-    -- Buscar por nombre común
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (
-            obj.Name:find("Park") or 
-            obj.Name:find("Goal") or 
-            obj.Name:find("Target") or
-            obj.Name:find("Win") or
-            obj.Name:find("Finish")
-        ) and (obj.Color == Color3.fromRGB(0, 255, 0) or obj.BrickColor.Name == "Lime green") then
-            parkingZone = obj
-            break
+    for i, obs in ipairs(scannedData.obstacles) do
+        if i <= 10 then -- Mostrar solo los primeros 10
+            report = report .. string.format(
+                "%d. %s\n   Pos: (%.0f, %.0f, %.0f)\n   Color: RGB(%.0f, %.0f, %.0f)\n\n",
+                i, obs.Name,
+                obs.Position.X, obs.Position.Y, obs.Position.Z,
+                obs.Color.R * 255, obs.Color.G * 255, obs.Color.B * 255
+            )
         end
     end
     
-    if parkingZone then
-        local vehicleRoot = vehicle.PrimaryPart or vehicle:FindFirstChild("VehicleSeat")
-        if vehicleRoot then
-            vehicleRoot.CFrame = parkingZone.CFrame + Vector3.new(0, 5, 0)
-            Fluent:Notify({
-                Title = "✅ Estacionado!",
-                Content = "Teleportado a la zona de estacionamiento",
-                Duration = 2
-            })
-        end
-    else
-        Fluent:Notify({
-            Title = "⚠️ No encontrado",
-            Content = "No se pudo encontrar la zona de estacionamiento",
-            Duration = 2
-        })
+    if #scannedData.obstacles > 10 then
+        report = report .. string.format("... y %d más", #scannedData.obstacles - 10)
     end
+    
+    return report
 end
 
--- Create Window
+local function getDetailedParkingReport()
+    local report = "🅿️ ZONAS DE ESTACIONAMIENTO:\n\n"
+    
+    if #scannedData.parkingZones == 0 then
+        return report .. "No se encontraron zonas de estacionamiento"
+    end
+    
+    for i, zone in ipairs(scannedData.parkingZones) do
+        report = report .. string.format(
+            "%d. %s\n   Pos: (%.0f, %.0f, %.0f)\n   Tamaño: %.0f x %.0f x %.0f\n\n",
+            i, zone.Name,
+            zone.Position.X, zone.Position.Y, zone.Position.Z,
+            zone.Size.X, zone.Size.Y, zone.Size.Z
+        )
+    end
+    
+    return report
+end
+
+local function getScriptReport()
+    local report = "📜 SCRIPTS DETECTADOS:\n\n"
+    
+    if #scannedData.scripts == 0 then
+        return report .. "No se encontraron scripts"
+    end
+    
+    for i, script in ipairs(scannedData.scripts) do
+        if i <= 15 then
+            report = report .. string.format(
+                "%d. [%s] %s\n   Parent: %s\n\n",
+                i, script.class, script.name, script.parent
+            )
+        end
+    end
+    
+    if #scannedData.scripts > 15 then
+        report = report .. string.format("... y %d más", #scannedData.scripts - 15)
+    end
+    
+    return report
+end
+
+-- ═══════════════════════════════════════
+-- 🎨 UI CREATION
+-- ═══════════════════════════════════════
+
 local Window = Fluent:CreateWindow({
-    Title = "🅿️ Parking Game Helper",
+    Title = "🔍 Parking Game Scanner",
     SubTitle = "by Gael Fonzar",
     TabWidth = 160,
-    Size = UDim2.fromOffset(520, 420),
+    Size = UDim2.fromOffset(580, 520),
     Acrylic = false,
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.RightShift
@@ -311,96 +365,201 @@ end)
 
 -- Create Tabs
 local Tabs = {
-    Main = Window:AddTab({ Title = "🅿️ Main", Icon = "car" }),
-    Auto = Window:AddTab({ Title = "🤖 Auto", Icon = "zap" }),
+    Scanner = Window:AddTab({ Title = "🔍 Scanner", Icon = "search" }),
+    Results = Window:AddTab({ Title = "📊 Results", Icon = "bar-chart" }),
+    Details = Window:AddTab({ Title = "📋 Details", Icon = "file-text" }),
     Settings = Window:AddTab({ Title = "⚙️ Settings", Icon = "settings" })
 }
 
 -- ═══════════════════════════════════════
--- 🅿️ MAIN TAB
+-- 🔍 SCANNER TAB
 -- ═══════════════════════════════════════
 
-Tabs.Main:AddParagraph({
-    Title = "🅿️ Parking Game Helper",
-    Content = "Atraviesa conos y obstáculos sin perder dinero!\n\n✅ Compatible con Estaciona un coche\n✅ Sin detecciones\n✅ Fácil de usar"
+Tabs.Scanner:AddParagraph({
+    Title = "🔍 Map Scanner",
+    Content = "Escanea el mapa completo para detectar:\n• Obstáculos y conos\n• Zonas de estacionamiento\n• Vehículos disponibles\n• Coleccionables y dinero\n• Scripts y elementos ocultos"
 })
 
-Tabs.Main:AddSection("Noclip")
+Tabs.Scanner:AddSection("Control de Escaneo")
 
-local NoclipToggle = Tabs.Main:AddToggle("VehicleNoclip", {
-    Title = "👻 Noclip de Vehículo",
-    Description = "Atraviesa TODOS los obstáculos",
-    Default = false,
-    Callback = function(Value)
-        noclipEnabled = Value
+Tabs.Scanner:AddButton({
+    Title = "🔍 Escanear Mapa Completo",
+    Description = "Analiza todo el Workspace",
+    Callback = function()
+        Fluent:Notify({
+            Title = "🔍 Escaneando...",
+            Content = "Por favor espera...",
+            Duration = 2
+        })
         
-        if Value then
-            startNoclip()
+        task.spawn(function()
+            performScan()
+            
             Fluent:Notify({
-                Title = "✅ Noclip ON",
-                Content = "Atraviesa todo sin daño!",
-                Duration = 3
+                Title = "✅ Escaneo Completo!",
+                Content = string.format(
+                    "Encontrados:\n" ..
+                    "• %d Obstáculos\n" ..
+                    "• %d Zonas de Estacionamiento\n" ..
+                    "• %d Vehículos\n" ..
+                    "Tiempo: %ss",
+                    #scannedData.obstacles,
+                    #scannedData.parkingZones,
+                    #scannedData.vehicles,
+                    scanStats.scanTime
+                ),
+                Duration = 5
+            })
+        end)
+    end
+})
+
+Tabs.Scanner:AddSection("Información")
+
+local ScanInfoParagraph = Tabs.Scanner:AddParagraph({
+    Title = "📊 Estado del Escaneo",
+    Content = "No se ha realizado ningún escaneo todavía.\n\nPresiona 'Escanear Mapa Completo' para comenzar."
+})
+
+-- Actualizar información cada segundo
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if scanStats.lastScan ~= "Never" then
+            ScanInfoParagraph:SetDesc(string.format(
+                "Último escaneo: %s\n" ..
+                "Objetos totales: %d\n" ..
+                "Tiempo de escaneo: %ss\n\n" ..
+                "✅ Datos listos para ver en Results",
+                scanStats.lastScan,
+                scanStats.totalObjects,
+                scanStats.scanTime
+            ))
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════
+-- 📊 RESULTS TAB
+-- ═══════════════════════════════════════
+
+Tabs.Results:AddParagraph({
+    Title = "📊 Resultados del Escaneo",
+    Content = "Aquí verás el resumen de los objetos encontrados"
+})
+
+Tabs.Results:AddSection("Resumen General")
+
+local BasicReportParagraph = Tabs.Results:AddParagraph({
+    Title = "📊 Reporte Básico",
+    Content = "Escanea el mapa primero para ver los resultados"
+})
+
+Tabs.Results:AddButton({
+    Title = "🔄 Actualizar Reporte",
+    Description = "Mostrar últimos resultados",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
             })
         else
-            stopNoclip()
+            BasicReportParagraph:SetDesc(getBasicReport())
             Fluent:Notify({
-                Title = "❌ Noclip OFF",
-                Content = "Colisiones restauradas",
+                Title = "✅ Actualizado",
+                Content = "Reporte actualizado",
                 Duration = 2
             })
         end
     end
 })
 
-Tabs.Main:AddButton({
-    Title = "🔄 Reiniciar Noclip",
-    Description = "Si cambias de vehículo",
+Tabs.Results:AddSection("Exportar Datos")
+
+Tabs.Results:AddButton({
+    Title = "📋 Copiar al Portapapeles",
+    Description = "Copia el reporte completo",
     Callback = function()
-        stopNoclip()
-        task.wait(0.5)
-        if NoclipToggle then
-            noclipEnabled = true
-            startNoclip()
+        if scanStats.lastScan == "Never" then
             Fluent:Notify({
-                Title = "🔄 Reiniciado",
-                Content = "Noclip reactivado",
+                Title = "⚠️ Aviso",
+                Content = "Primero escanea el mapa!",
+                Duration = 2
+            })
+        else
+            setclipboard(getBasicReport())
+            Fluent:Notify({
+                Title = "✅ Copiado!",
+                Content = "Reporte copiado al portapapeles",
                 Duration = 2
             })
         end
     end
 })
 
-Tabs.Main:AddSection("Información")
-
-Tabs.Main:AddParagraph({
-    Title = "ℹ️ Cómo Usar",
-    Content = "1. Sube a tu vehículo\n2. Activa el Noclip\n3. Maneja normalmente\n4. Los conos y barreras serán atravesables\n\n💡 Los obstáculos se volverán semi-transparentes"
-})
-
 -- ═══════════════════════════════════════
--- 🤖 AUTO TAB
+-- 📋 DETAILS TAB
 -- ═══════════════════════════════════════
 
-Tabs.Auto:AddParagraph({
-    Title = "🤖 Funciones Automáticas",
-    Content = "Herramientas para completar niveles fácilmente"
+Tabs.Details:AddParagraph({
+    Title = "📋 Detalles Específicos",
+    Content = "Información detallada de cada categoría"
 })
 
-Tabs.Auto:AddSection("Teleport")
+Tabs.Details:AddSection("Obstáculos")
 
-Tabs.Auto:AddButton({
-    Title = "🎯 Teleport a Zona de Estacionamiento",
-    Description = "Auto-completar el nivel",
+local ObstacleDetailParagraph = Tabs.Details:AddParagraph({
+    Title = "🚧 Detalles de Obstáculos",
+    Content = "Escanea el mapa primero"
+})
+
+Tabs.Details:AddButton({
+    Title = "🚧 Ver Obstáculos Detallados",
     Callback = function()
-        autoWin()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
+        else
+            ObstacleDetailParagraph:SetDesc(getDetailedObstacleReport())
+        end
     end
 })
 
-Tabs.Auto:AddSection("Información")
+Tabs.Details:AddSection("Zonas de Estacionamiento")
 
-Tabs.Auto:AddParagraph({
-    Title = "⚠️ Nota",
-    Content = "La función de Auto-Win puede no funcionar en todos los niveles. Si no funciona, usa el Noclip para llegar manualmente."
+local ParkingDetailParagraph = Tabs.Details:AddParagraph({
+    Title = "🅿️ Detalles de Parking",
+    Content = "Escanea el mapa primero"
+})
+
+Tabs.Details:AddButton({
+    Title = "🅿️ Ver Zonas Detalladas",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
+        else
+            ParkingDetailParagraph:SetDesc(getDetailedParkingReport())
+        end
+    end
+})
+
+Tabs.Details:AddSection("Scripts")
+
+local ScriptDetailParagraph = Tabs.Details:AddParagraph({
+    Title = "📜 Scripts Detectados",
+    Content = "Escanea el mapa primero"
+})
+
+Tabs.Details:AddButton({
+    Title = "📜 Ver Scripts",
+    Callback = function()
+        if scanStats.lastScan == "Never" then
+            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
+        else
+            ScriptDetailParagraph:SetDesc(getScriptReport())
+        end
+    end
 })
 
 -- ═══════════════════════════════════════
@@ -410,7 +569,6 @@ Tabs.Auto:AddParagraph({
 Tabs.Settings:AddButton({
     Title = "🗑️ Unload Script",
     Callback = function()
-        stopNoclip()
         Fluent:Destroy()
     end
 })
@@ -418,47 +576,24 @@ Tabs.Settings:AddButton({
 Tabs.Settings:AddSection("Info")
 
 Tabs.Settings:AddParagraph({
-    Title = "👤 Parking Game Helper v1.0",
-    Content = "Created by: Gael Fonzar\nTheme: Dark + Red\nStatus: ✅ Loaded\n\nCompatible con:\n• Estaciona un coche 🅿️\n• Otros juegos de estacionamiento"
+    Title = "👤 Parking Game Scanner v1.0",
+    Content = "Created by: Gael Fonzar\nTheme: Dark + Red\nStatus: ✅ Loaded\n\nEste scanner detecta:\n• Obstáculos y barreras\n• Zonas de estacionamiento\n• Vehículos\n• Coleccionables\n• Scripts ocultos\n• Y mucho más!"
 })
-
--- Detectar cuando el jugador cambia de vehículo
-player.CharacterAdded:Connect(function(char)
-    task.wait(2)
-    if noclipEnabled then
-        stopNoclip()
-        task.wait(0.5)
-        noclipEnabled = true
-        startNoclip()
-    end
-end)
-
--- Cleanup
-local function cleanup()
-    stopNoclip()
-    Fluent:Notify({
-        Title = "👋 Unloaded",
-        Content = "Parking Helper removed",
-        Duration = 2
-    })
-end
-
-Window:OnUnload(cleanup)
 
 -- Final notification
 Fluent:Notify({
-    Title = "🅿️ Parking Game Helper",
-    Content = "Listo! Activa el noclip y estaciona sin problemas\nPress RightShift to toggle",
+    Title = "🔍 Scanner Loaded",
+    Content = "Presiona 'Escanear Mapa' para comenzar\nRightShift para abrir/cerrar",
     Duration = 4
 })
 
 print("════════════════════════════════")
-print("🅿️ Parking Game Helper v1.0")
+print("🔍 Parking Game Scanner v1.0")
 print("Created by: Gael Fonzar")
 print("Features:")
-print("• Atraviesa conos y obstáculos")
-print("• Sin perder dinero")
-print("• Auto-Win (experimental)")
-print("• Compatible con Estaciona un coche")
+print("• Escaneo completo del mapa")
+print("• Detección de obstáculos")
+print("• Análisis de zonas de parking")
+print("• Detección de scripts")
 print("Press RightShift to open")
 print("════════════════════════════════")
