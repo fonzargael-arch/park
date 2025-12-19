@@ -1,474 +1,358 @@
 --[[
     ═══════════════════════════════════════
-    🔍 PARKING GAME SCANNER v1.0
+    🎮 GF HUB - Universal Script v4.0
     ═══════════════════════════════════════
     Created by: Gael Fonzar
-    Solo Scanner - Analiza el mapa completo
+    Theme: Black + Red Accent
+    Features: Bring Player, Kill Aura, Hit
     ═══════════════════════════════════════
 ]]
 
 -- Load Fluent Library
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 -- Services
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 
--- Variables de Escaneo
-local scannedData = {
-    obstacles = {},
-    parkingZones = {},
-    vehicles = {},
-    checkpoints = {},
-    collectibles = {},
-    damageZones = {},
-    teleporters = {},
-    scripts = {},
-    allParts = {}
+-- Variables
+local selectedPlayer = nil
+local espEnabled = false
+local espObjects = {}
+local espConfig = {
+    fillColor = Color3.fromRGB(255, 0, 0),
+    outlineColor = Color3.fromRGB(255, 255, 255),
+    fillTransparency = 0.5,
+    outlineTransparency = 0,
+    showHealth = true,
+    showDistance = true
 }
 
-local scanStats = {
-    totalObjects = 0,
-    scanTime = 0,
-    lastScan = "Never"
-}
+local connections = {}
+local hitboxCache = {}
 
--- ═══════════════════════════════════════
--- 🔍 FUNCIONES DE IDENTIFICACIÓN
--- ═══════════════════════════════════════
+-- Bring Player Variables
+local bringEnabled = false
+local bringLoop = false
+local bringSpeed = 0.5
 
-local function isObstacle(part)
-    if not part or not part:IsA("BasePart") then return false end
-    if part.Name == "Floor" or part.Name == "Ground" or part.Name == "Baseplate" then return false end
-    
-    local keywords = {
-        "Cone", "cone", "cono", 
-        "Barrier", "barrier", "barrera",
-        "Obstacle", "obstacle", "obstaculo",
-        "Hazard", "hazard", "peligro",
-        "Block", "block", "bloque",
-        "Wall", "wall", "muro",
-        "Fence", "fence", "valla"
-    }
-    
-    local partName = part.Name:lower()
-    for _, keyword in ipairs(keywords) do
-        if string.find(partName, keyword:lower()) then 
-            return true 
-        end
-    end
-    
-    -- Detectar por color (conos naranjas/rojos)
-    local color = part.Color
-    if (color.R > 0.7 and color.G < 0.5) or 
-       (color.R > 0.7 and color.G > 0.6 and color.B < 0.3) then
-        return true
-    end
-    
-    return false
+-- Kill Aura Variables
+local killAuraEnabled = false
+local killAuraRange = 20
+local killAuraSpeed = 0.1
+
+-- Helper Functions
+local function getChar()
+    return player.Character
 end
 
-local function isParkingZone(part)
-    if not part or not part:IsA("BasePart") then return false end
-    
-    local keywords = {"Park", "park", "Goal", "goal", "Target", "target", "Win", "win", "Finish", "finish"}
-    for _, keyword in ipairs(keywords) do
-        if string.find(part.Name, keyword) then 
-            return true 
-        end
-    end
-    
-    -- Detectar por color verde
-    if part.Color == Color3.fromRGB(0, 255, 0) or 
-       part.BrickColor.Name == "Lime green" or
-       part.BrickColor.Name == "Bright green" then
-        return true
-    end
-    
-    return false
+local function getRoot()
+    local char = getChar()
+    return char and char:FindFirstChild("HumanoidRootPart")
 end
 
-local function isVehicle(model)
-    if not model or not model:IsA("Model") then return false end
-    return model:FindFirstChild("VehicleSeat") or model:FindFirstChild("DriveSeat")
+local function getHumanoid()
+    local char = getChar()
+    return char and char:FindFirstChildOfClass("Humanoid")
 end
 
-local function isCollectible(part)
-    if not part or not part:IsA("BasePart") then return false end
+-- Enhanced ESP System
+local function createESP(target)
+    if not target or not target.Character then return end
     
-    local keywords = {"Coin", "coin", "Money", "money", "Cash", "cash", "Dollar", "dollar"}
-    for _, keyword in ipairs(keywords) do
-        if string.find(part.Name, keyword) then 
-            return true 
-        end
-    end
-    
-    -- Detectar por color amarillo/dorado
-    local color = part.Color
-    if (color.R > 0.8 and color.G > 0.7 and color.B < 0.3) then
-        return true
-    end
-    
-    return false
-end
-
-local function isDamageZone(part)
-    if not part or not part:IsA("BasePart") then return false end
-    
-    local keywords = {"Damage", "damage", "Kill", "kill", "Death", "death", "Lava", "lava"}
-    for _, keyword in ipairs(keywords) do
-        if string.find(part.Name, keyword) then 
-            return true 
-        end
-    end
-    
-    -- Detectar zonas rojas
-    if part.Color == Color3.fromRGB(255, 0, 0) or part.BrickColor.Name == "Really red" then
-        return true
-    end
-    
-    return false
-end
-
-local function isCheckpoint(part)
-    if not part or not part:IsA("BasePart") then return false end
-    
-    local keywords = {"Checkpoint", "checkpoint", "Point", "point", "Stage", "stage"}
-    for _, keyword in ipairs(keywords) do
-        if string.find(part.Name, keyword) then 
-            return true 
-        end
-    end
-    
-    return false
-end
-
-local function isTeleporter(part)
-    if not part or not part:IsA("BasePart") then return false end
-    
-    local keywords = {"Teleport", "teleport", "Portal", "portal", "Warp", "warp"}
-    for _, keyword in ipairs(keywords) do
-        if string.find(part.Name, keyword) then 
-            return true 
-        end
-    end
-    
-    return false
-end
-
--- ═══════════════════════════════════════
--- 🔍 FUNCIÓN DE ESCANEO PRINCIPAL
--- ═══════════════════════════════════════
-
-local function performScan()
-    local startTime = tick()
-    
-    -- Resetear datos
-    scannedData = {
-        obstacles = {},
-        parkingZones = {},
-        vehicles = {},
-        checkpoints = {},
-        collectibles = {},
-        damageZones = {},
-        teleporters = {},
-        scripts = {},
-        allParts = {}
-    }
-    
-    scanStats.totalObjects = 0
-    
-    -- Escanear todo el Workspace
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        scanStats.totalObjects = scanStats.totalObjects + 1
-        
-        pcall(function()
-            -- Escanear BaseParts
-            if obj:IsA("BasePart") then
-                table.insert(scannedData.allParts, {
-                    name = obj.Name,
-                    class = obj.ClassName,
-                    position = obj.Position,
-                    size = obj.Size,
-                    color = obj.Color,
-                    material = obj.Material.Name
-                })
-                
-                if isObstacle(obj) then
-                    table.insert(scannedData.obstacles, obj)
-                elseif isParkingZone(obj) then
-                    table.insert(scannedData.parkingZones, obj)
-                elseif isCollectible(obj) then
-                    table.insert(scannedData.collectibles, obj)
-                elseif isDamageZone(obj) then
-                    table.insert(scannedData.damageZones, obj)
-                elseif isCheckpoint(obj) then
-                    table.insert(scannedData.checkpoints, obj)
-                elseif isTeleporter(obj) then
-                    table.insert(scannedData.teleporters, obj)
-                end
+    if espObjects[target.Name] then
+        pcall(function() 
+            if espObjects[target.Name].highlight then
+                espObjects[target.Name].highlight:Destroy()
             end
-            
-            -- Escanear Modelos (Vehículos)
-            if obj:IsA("Model") and isVehicle(obj) then
-                table.insert(scannedData.vehicles, obj)
-            end
-            
-            -- Escanear Scripts
-            if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local fullPath = obj:GetFullName()
-                table.insert(scannedData.scripts, {
-                    name = obj.Name,
-                    class = obj.ClassName,
-                    parent = obj.Parent and obj.Parent.Name or "nil",
-                    fullPath = fullPath,
-                    enabled = obj.Enabled or false
-                })
+            if espObjects[target.Name].billboard then
+                espObjects[target.Name].billboard:Destroy()
             end
         end)
     end
     
-    scanStats.scanTime = math.floor((tick() - startTime) * 1000) / 1000
-    scanStats.lastScan = os.date("%H:%M:%S")
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "GF_ESP"
+    highlight.Adornee = target.Character
+    highlight.FillColor = espConfig.fillColor
+    highlight.OutlineColor = espConfig.outlineColor
+    highlight.FillTransparency = espConfig.fillTransparency
+    highlight.OutlineTransparency = espConfig.outlineTransparency
+    highlight.Parent = target.Character
     
-    return scannedData
+    local head = target.Character:FindFirstChild("Head")
+    if not head then return end
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "GF_ESPInfo"
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = target.Name
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextStrokeTransparency = 0.5
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = billboard
+    
+    local healthLabel = Instance.new("TextLabel")
+    healthLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    healthLabel.Position = UDim2.new(0, 0, 0.35, 0)
+    healthLabel.BackgroundTransparency = 1
+    healthLabel.Text = "HP: 100"
+    healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    healthLabel.TextStrokeTransparency = 0.5
+    healthLabel.Font = Enum.Font.Gotham
+    healthLabel.TextSize = 12
+    healthLabel.Visible = espConfig.showHealth
+    healthLabel.Parent = billboard
+    
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    distanceLabel.Position = UDim2.new(0, 0, 0.65, 0)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.Text = "0 studs"
+    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    distanceLabel.TextStrokeTransparency = 0.5
+    distanceLabel.Font = Enum.Font.Gotham
+    distanceLabel.TextSize = 12
+    distanceLabel.Visible = espConfig.showDistance
+    distanceLabel.Parent = billboard
+    
+    espObjects[target.Name] = {
+        highlight = highlight,
+        billboard = billboard,
+        healthLabel = healthLabel,
+        distanceLabel = distanceLabel
+    }
 end
 
--- ═══════════════════════════════════════
--- 📊 FUNCIONES DE REPORTE
--- ═══════════════════════════════════════
-
-local function getBasicReport()
-    return string.format(
-        "📊 SCAN REPORT\n\n" ..
-        "🚧 Obstáculos: %d\n" ..
-        "🅿️ Zonas de Estacionamiento: %d\n" ..
-        "🚗 Vehículos: %d\n" ..
-        "📍 Checkpoints: %d\n" ..
-        "💰 Coleccionables: %d\n" ..
-        "💀 Zonas de Daño: %d\n" ..
-        "🌀 Teleportadores: %d\n" ..
-        "📜 Scripts: %d\n\n" ..
-        "⏱️ Tiempo: %ss\n" ..
-        "🔢 Total Objetos: %d",
-        #scannedData.obstacles,
-        #scannedData.parkingZones,
-        #scannedData.vehicles,
-        #scannedData.checkpoints,
-        #scannedData.collectibles,
-        #scannedData.damageZones,
-        #scannedData.teleporters,
-        #scannedData.scripts,
-        scanStats.scanTime,
-        scanStats.totalObjects
-    )
-end
-
-local function getDetailedObstacleReport()
-    local report = "🚧 OBSTÁCULOS DETECTADOS:\n\n"
-    
-    if #scannedData.obstacles == 0 then
-        return report .. "No se encontraron obstáculos"
+local function removeESP(target)
+    if espObjects[target.Name] then
+        pcall(function() 
+            if espObjects[target.Name].highlight then
+                espObjects[target.Name].highlight:Destroy()
+            end
+            if espObjects[target.Name].billboard then
+                espObjects[target.Name].billboard:Destroy()
+            end
+        end)
+        espObjects[target.Name] = nil
     end
-    
-    for i, obs in ipairs(scannedData.obstacles) do
-        if i <= 10 then -- Mostrar solo los primeros 10
-            report = report .. string.format(
-                "%d. %s\n   Pos: (%.0f, %.0f, %.0f)\n   Color: RGB(%.0f, %.0f, %.0f)\n\n",
-                i, obs.Name,
-                obs.Position.X, obs.Position.Y, obs.Position.Z,
-                obs.Color.R * 255, obs.Color.G * 255, obs.Color.B * 255
-            )
+end
+
+local function updateAllESP()
+    for _, target in pairs(Players:GetPlayers()) do
+        if target ~= player then
+            if espEnabled then
+                createESP(target)
+            else
+                removeESP(target)
+            end
         end
     end
-    
-    if #scannedData.obstacles > 10 then
-        report = report .. string.format("... y %d más", #scannedData.obstacles - 10)
-    end
-    
-    return report
 end
 
-local function getDetailedParkingReport()
-    local report = "🅿️ ZONAS DE ESTACIONAMIENTO:\n\n"
+local function updateESPInfo()
+    if not espEnabled then return end
     
-    if #scannedData.parkingZones == 0 then
-        return report .. "No se encontraron zonas de estacionamiento"
-    end
+    local myRoot = getRoot()
+    if not myRoot then return end
     
-    for i, zone in ipairs(scannedData.parkingZones) do
-        report = report .. string.format(
-            "%d. %s\n   Pos: (%.0f, %.0f, %.0f)\n   Tamaño: %.0f x %.0f x %.0f\n\n",
-            i, zone.Name,
-            zone.Position.X, zone.Position.Y, zone.Position.Z,
-            zone.Size.X, zone.Size.Y, zone.Size.Z
-        )
-    end
-    
-    return report
-end
-
-local function getScriptReport()
-    local report = "📜 SCRIPTS DETECTADOS:\n\n"
-    
-    if #scannedData.scripts == 0 then
-        return report .. "No se encontraron scripts"
-    end
-    
-    for i, script in ipairs(scannedData.scripts) do
-        if i <= 15 then
-            report = report .. string.format(
-                "%d. [%s] %s\n   Parent: %s\n\n",
-                i, script.class, script.name, script.parent
-            )
+    for _, target in pairs(Players:GetPlayers()) do
+        if target ~= player and espObjects[target.Name] then
+            local espData = espObjects[target.Name]
+            
+            if target.Character then
+                local targetHum = target.Character:FindFirstChildOfClass("Humanoid")
+                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                
+                if targetHum and espData.healthLabel then
+                    local health = math.floor(targetHum.Health)
+                    local maxHealth = math.floor(targetHum.MaxHealth)
+                    espData.healthLabel.Text = "HP: " .. health .. "/" .. maxHealth
+                    
+                    local healthPercent = health / maxHealth
+                    if healthPercent > 0.6 then
+                        espData.healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                    elseif healthPercent > 0.3 then
+                        espData.healthLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+                    else
+                        espData.healthLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                    end
+                    
+                    espData.healthLabel.Visible = espConfig.showHealth
+                end
+                
+                if targetRoot and espData.distanceLabel then
+                    local distance = math.floor((myRoot.Position - targetRoot.Position).Magnitude)
+                    espData.distanceLabel.Text = distance .. " studs"
+                    espData.distanceLabel.Visible = espConfig.showDistance
+                end
+            end
         end
     end
-    
-    if #scannedData.scripts > 15 then
-        report = report .. string.format("... y %d más", #scannedData.scripts - 15)
-    end
-    
-    return report
 end
 
-local function getFullScriptExport()
-    local export = "═══════════════════════════════════════\n"
-    export = export .. "📜 FULL SCRIPT EXPORT - Parking Game\n"
-    export = export .. "═══════════════════════════════════════\n\n"
-    export = export .. string.format("Total Scripts: %d\n", #scannedData.scripts)
-    export = export .. string.format("Scan Time: %s\n", scanStats.lastScan)
-    export = export .. string.format("Total Objects Scanned: %d\n\n", scanStats.totalObjects)
-    export = export .. "═══════════════════════════════════════\n\n"
-    
-    for i, script in ipairs(scannedData.scripts) do
-        export = export .. string.format(
-            "Script #%d\n" ..
-            "├─ Name: %s\n" ..
-            "├─ Class: %s\n" ..
-            "├─ Parent: %s\n" ..
-            "└─ Full Path: Workspace.%s\n\n",
-            i, script.name, script.class, script.parent, script.fullPath or "Unknown"
-        )
+local function getPlayerList()
+    local list = {}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player then
+            table.insert(list, p.Name)
+        end
     end
-    
-    return export
+    return list
 end
 
-local function getFullObstacleExport()
-    local export = "═══════════════════════════════════════\n"
-    export = export .. "🚧 FULL OBSTACLE EXPORT\n"
-    export = export .. "═══════════════════════════════════════\n\n"
-    export = export .. string.format("Total Obstacles: %d\n\n", #scannedData.obstacles)
-    
-    for i, obs in ipairs(scannedData.obstacles) do
-        export = export .. string.format(
-            "Obstacle #%d: %s\n" ..
-            "├─ Position: Vector3.new(%.2f, %.2f, %.2f)\n" ..
-            "├─ Size: Vector3.new(%.2f, %.2f, %.2f)\n" ..
-            "├─ Color: Color3.fromRGB(%.0f, %.0f, %.0f)\n" ..
-            "└─ Material: %s\n\n",
-            i, obs.Name,
-            obs.Position.X, obs.Position.Y, obs.Position.Z,
-            obs.Size.X, obs.Size.Y, obs.Size.Z,
-            obs.Color.R * 255, obs.Color.G * 255, obs.Color.B * 255,
-            obs.Material.Name
-        )
+local function getPlayerByName(name)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Name == name then
+            return p
+        end
     end
-    
-    return export
+    return nil
 end
 
-local function getFullParkingExport()
-    local export = "═══════════════════════════════════════\n"
-    export = export .. "🅿️ FULL PARKING ZONES EXPORT\n"
-    export = export .. "═══════════════════════════════════════\n\n"
-    export = export .. string.format("Total Parking Zones: %d\n\n", #scannedData.parkingZones)
-    
-    for i, zone in ipairs(scannedData.parkingZones) do
-        export = export .. string.format(
-            "Zone #%d: %s\n" ..
-            "├─ Position: Vector3.new(%.2f, %.2f, %.2f)\n" ..
-            "├─ Size: Vector3.new(%.2f, %.2f, %.2f)\n" ..
-            "├─ Color: Color3.fromRGB(%.0f, %.0f, %.0f)\n" ..
-            "└─ CFrame: CFrame.new(%.2f, %.2f, %.2f)\n\n",
-            i, zone.Name,
-            zone.Position.X, zone.Position.Y, zone.Position.Z,
-            zone.Size.X, zone.Size.Y, zone.Size.Z,
-            zone.Color.R * 255, zone.Color.G * 255, zone.Color.B * 255,
-            zone.CFrame.Position.X, zone.CFrame.Position.Y, zone.CFrame.Position.Z
-        )
+-- BRING PLAYER TO YOU
+local function bringPlayer(target)
+    if not target or not target.Character then
+        Fluent:Notify({
+            Title = "❌ Error",
+            Content = "Player not found!",
+            Duration = 2
+        })
+        return
     end
     
-    return export
+    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    local myRoot = getRoot()
+    
+    if not targetRoot or not myRoot then return end
+    
+    -- Teleport player to you
+    targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
+    
+    Fluent:Notify({
+        Title = "✅ Brought",
+        Content = target.Name .. " teleported to you!",
+        Duration = 2
+    })
 end
 
-local function getAllDataExport()
-    local export = "═══════════════════════════════════════\n"
-    export = export .. "🔍 COMPLETE MAP DATA EXPORT\n"
-    export = export .. "Created by: Gael Fonzar Scanner\n"
-    export = export .. "═══════════════════════════════════════\n\n"
-    export = export .. getBasicReport() .. "\n\n"
-    export = export .. "═══════════════════════════════════════\n\n"
+local function startBringLoop()
+    bringLoop = true
     
-    -- Scripts
-    export = export .. "📜 SCRIPTS (" .. #scannedData.scripts .. "):\n"
-    for i, script in ipairs(scannedData.scripts) do
-        export = export .. string.format("%d. [%s] %s (Parent: %s)\n", 
-            i, script.class, script.name, script.parent)
-    end
-    
-    export = export .. "\n═══════════════════════════════════════\n\n"
-    
-    -- Parking Zones (primeras 10)
-    export = export .. "🅿️ PARKING ZONES (Top 10):\n"
-    for i = 1, math.min(10, #scannedData.parkingZones) do
-        local zone = scannedData.parkingZones[i]
-        export = export .. string.format("%d. %s - Pos(%.0f, %.0f, %.0f)\n", 
-            i, zone.Name, zone.Position.X, zone.Position.Y, zone.Position.Z)
-    end
-    
-    export = export .. "\n═══════════════════════════════════════\n\n"
-    
-    -- Vehicles
-    export = export .. "🚗 VEHICLES (" .. #scannedData.vehicles .. "):\n"
-    for i, vehicle in ipairs(scannedData.vehicles) do
-        export = export .. string.format("%d. %s\n", i, vehicle.Name)
-    end
-    
-    export = export .. "\n═══════════════════════════════════════\n"
-    export = export .. "End of Export\n"
-    
-    return export
+    task.spawn(function()
+        while bringLoop and bringEnabled and selectedPlayer do
+            if selectedPlayer and selectedPlayer.Character then
+                local targetRoot = selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local myRoot = getRoot()
+                
+                if targetRoot and myRoot then
+                    targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
+                end
+            end
+            
+            task.wait(bringSpeed)
+        end
+    end)
 end
 
--- ═══════════════════════════════════════
--- 🎨 UI CREATION
--- ═══════════════════════════════════════
+local function stopBringLoop()
+    bringLoop = false
+    bringEnabled = false
+end
 
+-- KILL AURA SYSTEM
+local function hitPlayer(target)
+    if not target or not target.Character then return end
+    
+    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    local targetHum = target.Character:FindFirstChildOfClass("Humanoid")
+    local myRoot = getRoot()
+    
+    if not targetRoot or not targetHum or not myRoot then return end
+    
+    -- Check if in range
+    local distance = (myRoot.Position - targetRoot.Position).Magnitude
+    if distance > killAuraRange then return end
+    
+    -- Method 1: Teleport behind and hit
+    local originalPos = myRoot.CFrame
+    myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+    
+    task.wait(0.05)
+    
+    -- Simulate punch/hit
+    local tool = player.Character:FindFirstChildOfClass("Tool")
+    if tool then
+        tool:Activate()
+    end
+    
+    task.wait(0.05)
+    myRoot.CFrame = originalPos
+end
+
+local function killAuraLoop()
+    while killAuraEnabled do
+        for _, target in pairs(Players:GetPlayers()) do
+            if target ~= player and target.Character then
+                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                local myRoot = getRoot()
+                
+                if targetRoot and myRoot then
+                    local distance = (myRoot.Position - targetRoot.Position).Magnitude
+                    
+                    if distance <= killAuraRange then
+                        hitPlayer(target)
+                    end
+                end
+            end
+        end
+        
+        task.wait(killAuraSpeed)
+    end
+end
+
+-- Create Window with Dark Theme
 local Window = Fluent:CreateWindow({
-    Title = "🔍 Parking Game Scanner",
+    Title = "🎮 GF HUB v4.0",
     SubTitle = "by Gael Fonzar",
     TabWidth = 160,
-    Size = UDim2.fromOffset(580, 520),
-    Acrylic = false,
+    Size = UDim2.fromOffset(580, 480),
+    Acrylic = false, -- Disable for solid black
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.RightShift
 })
 
--- Apply Dark Theme
+-- Apply Custom Dark Theme (Black + Red)
 pcall(function()
     local gui = game:GetService("CoreGui"):FindFirstChild("FluentUI") or player.PlayerGui:FindFirstChild("FluentUI")
     if gui then
         for _, obj in pairs(gui:GetDescendants()) do
+            -- Make background pure black
             if obj:IsA("Frame") or obj:IsA("ScrollingFrame") then
                 obj.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             end
+            
+            -- Make accent colors red
             if obj:IsA("TextButton") or obj:IsA("ImageButton") then
                 obj.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
             end
+            
+            -- Red text accents
             if obj:IsA("TextLabel") and obj.Name:find("Title") then
                 obj.TextColor3 = Color3.fromRGB(255, 50, 50)
             end
@@ -478,339 +362,429 @@ end)
 
 -- Create Tabs
 local Tabs = {
-    Scanner = Window:AddTab({ Title = "🔍 Scanner", Icon = "search" }),
-    Results = Window:AddTab({ Title = "📊 Results", Icon = "bar-chart" }),
-    Details = Window:AddTab({ Title = "📋 Details", Icon = "file-text" }),
+    Main = Window:AddTab({ Title = "🏠 Main", Icon = "home" }),
+    Movement = Window:AddTab({ Title = "🚀 Movement", Icon = "wind" }),
+    Players = Window:AddTab({ Title = "👥 Players", Icon = "users" }),
+    Combat = Window:AddTab({ Title = "⚔️ Combat", Icon = "sword" }),
+    Visual = Window:AddTab({ Title = "👁️ Visual", Icon = "eye" }),
     Settings = Window:AddTab({ Title = "⚙️ Settings", Icon = "settings" })
 }
 
 -- ═══════════════════════════════════════
--- 🔍 SCANNER TAB
+-- 🏠 MAIN TAB
 -- ═══════════════════════════════════════
 
-Tabs.Scanner:AddParagraph({
-    Title = "🔍 Map Scanner",
-    Content = "Escanea el mapa completo para detectar:\n• Obstáculos y conos\n• Zonas de estacionamiento\n• Vehículos disponibles\n• Coleccionables y dinero\n• Scripts y elementos ocultos"
+Tabs.Main:AddParagraph({
+    Title = "🎮 Welcome to GF HUB v4.0!",
+    Content = "Dark Theme Edition\n\nNew Features:\n• Bring Player to You\n• Kill Aura\n• One-Hit Kill\n• Black + Red Theme"
 })
 
-Tabs.Scanner:AddSection("Control de Escaneo")
+-- ═══════════════════════════════════════
+-- 🚀 MOVEMENT TAB
+-- ═══════════════════════════════════════
 
-Tabs.Scanner:AddButton({
-    Title = "🔍 Escanear Mapa Completo",
-    Description = "Analiza todo el Workspace",
-    Callback = function()
-        Fluent:Notify({
-            Title = "🔍 Escaneando...",
-            Content = "Por favor espera...",
-            Duration = 2
-        })
+local flyEnabled = false
+local flySpeed = 100
+local speedEnabled = false
+local walkSpeed = 16
+local infJumpEnabled = false
+local noclipEnabled = false
+
+local FlyToggle = Tabs.Movement:AddToggle("FlyToggle", {
+    Title = "✈️ Fly Mode",
+    Description = "Fly using WASD + Space/Shift",
+    Default = false,
+    Callback = function(Value)
+        flyEnabled = Value
+        local root = getRoot()
         
-        task.spawn(function()
-            performScan()
+        if Value and root then
+            if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
+            if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
+            
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "GF_Fly"
+            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+            bv.Velocity = Vector3.zero
+            bv.Parent = root
+            
+            local bg = Instance.new("BodyGyro")
+            bg.Name = "GF_Gyro"
+            bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+            bg.P = 9e4
+            bg.Parent = root
             
             Fluent:Notify({
-                Title = "✅ Escaneo Completo!",
-                Content = string.format(
-                    "Encontrados:\n" ..
-                    "• %d Obstáculos\n" ..
-                    "• %d Zonas de Estacionamiento\n" ..
-                    "• %d Vehículos\n" ..
-                    "Tiempo: %ss",
-                    #scannedData.obstacles,
-                    #scannedData.parkingZones,
-                    #scannedData.vehicles,
-                    scanStats.scanTime
-                ),
-                Duration = 5
-            })
-        end)
-    end
-})
-
-Tabs.Scanner:AddSection("Información")
-
-local ScanInfoParagraph = Tabs.Scanner:AddParagraph({
-    Title = "📊 Estado del Escaneo",
-    Content = "No se ha realizado ningún escaneo todavía.\n\nPresiona 'Escanear Mapa Completo' para comenzar."
-})
-
--- Actualizar información cada segundo
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if scanStats.lastScan ~= "Never" then
-            ScanInfoParagraph:SetDesc(string.format(
-                "Último escaneo: %s\n" ..
-                "Objetos totales: %d\n" ..
-                "Tiempo de escaneo: %ss\n\n" ..
-                "✅ Datos listos para ver en Results",
-                scanStats.lastScan,
-                scanStats.totalObjects,
-                scanStats.scanTime
-            ))
-        end
-    end
-end)
-
--- ═══════════════════════════════════════
--- 📊 RESULTS TAB
--- ═══════════════════════════════════════
-
-Tabs.Results:AddParagraph({
-    Title = "📊 Resultados del Escaneo",
-    Content = "Aquí verás el resumen de los objetos encontrados"
-})
-
-Tabs.Results:AddSection("Resumen General")
-
-local BasicReportParagraph = Tabs.Results:AddParagraph({
-    Title = "📊 Reporte Básico",
-    Content = "Escanea el mapa primero para ver los resultados"
-})
-
-Tabs.Results:AddButton({
-    Title = "🔄 Actualizar Reporte",
-    Description = "Mostrar últimos resultados",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
+                Title = "✈️ Fly ON",
+                Content = "Use WASD + Space/Shift",
                 Duration = 2
             })
         else
-            BasicReportParagraph:SetDesc(getBasicReport())
-            Fluent:Notify({
-                Title = "✅ Actualizado",
-                Content = "Reporte actualizado",
-                Duration = 2
-            })
+            if root then
+                if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
+                if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
+            end
         end
     end
 })
 
-Tabs.Results:AddSection("Exportar Datos")
+Tabs.Movement:AddSlider("FlySpeed", {
+    Title = "Fly Speed",
+    Default = 100,
+    Min = 10,
+    Max = 300,
+    Rounding = 0,
+    Callback = function(Value)
+        flySpeed = Value
+    end
+})
 
-Tabs.Results:AddButton({
-    Title = "📋 Copiar Reporte Completo",
-    Description = "Copia TODO al portapapeles",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
-                Duration = 2
-            })
-        else
-            setclipboard(getAllDataExport())
-            Fluent:Notify({
-                Title = "✅ Copiado!",
-                Content = "TODOS los datos copiados al portapapeles",
-                Duration = 3
-            })
+Tabs.Movement:AddSection("Walking")
+
+Tabs.Movement:AddToggle("SpeedToggle", {
+    Title = "🏃 Custom Speed",
+    Default = false,
+    Callback = function(Value)
+        speedEnabled = Value
+        if not Value then
+            local hum = getHumanoid()
+            if hum then hum.WalkSpeed = 16 end
         end
     end
 })
 
-Tabs.Results:AddButton({
-    Title = "📜 Copiar Solo Scripts",
-    Description = "Exporta solo los scripts detectados",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
-                Duration = 2
-            })
-        else
-            setclipboard(getFullScriptExport())
-            Fluent:Notify({
-                Title = "✅ Scripts Copiados!",
-                Content = string.format("%d scripts exportados", #scannedData.scripts),
-                Duration = 2
-            })
-        end
+Tabs.Movement:AddSlider("WalkSpeed", {
+    Title = "Walk Speed",
+    Default = 16,
+    Min = 16,
+    Max = 300,
+    Rounding = 0,
+    Callback = function(Value)
+        walkSpeed = Value
     end
 })
 
-Tabs.Results:AddButton({
-    Title = "🚧 Copiar Solo Obstáculos",
-    Description = "Exporta obstáculos con posiciones",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
-                Duration = 2
-            })
-        else
-            setclipboard(getFullObstacleExport())
-            Fluent:Notify({
-                Title = "✅ Obstáculos Copiados!",
-                Content = string.format("%d obstáculos exportados", #scannedData.obstacles),
-                Duration = 2
-            })
-        end
+Tabs.Movement:AddSection("Other")
+
+Tabs.Movement:AddToggle("InfJump", {
+    Title = "♾️ Infinite Jump",
+    Default = false,
+    Callback = function(Value)
+        infJumpEnabled = Value
     end
 })
 
-Tabs.Results:AddButton({
-    Title = "🅿️ Copiar Zonas de Parking",
-    Description = "Exporta zonas con coordenadas",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
-                Duration = 2
-            })
-        else
-            setclipboard(getFullParkingExport())
-            Fluent:Notify({
-                Title = "✅ Parking Copiado!",
-                Content = string.format("%d zonas exportadas", #scannedData.parkingZones),
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Results:AddButton({
-    Title = "📊 Copiar Solo Resumen",
-    Description = "Estadísticas básicas",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({
-                Title = "⚠️ Aviso",
-                Content = "Primero escanea el mapa!",
-                Duration = 2
-            })
-        else
-            setclipboard(getBasicReport())
-            Fluent:Notify({
-                Title = "✅ Resumen Copiado!",
-                Content = "Estadísticas copiadas",
-                Duration = 2
-            })
-        end
+Tabs.Movement:AddToggle("Noclip", {
+    Title = "👻 Noclip",
+    Default = false,
+    Callback = function(Value)
+        noclipEnabled = Value
     end
 })
 
 -- ═══════════════════════════════════════
--- 📋 DETAILS TAB
+-- 👥 PLAYERS TAB
 -- ═══════════════════════════════════════
 
-Tabs.Details:AddParagraph({
-    Title = "📋 Detalles Específicos",
-    Content = "Información detallada de cada categoría"
+Tabs.Players:AddParagraph({
+    Title = "👥 Player Control",
+    Content = "Select and control other players"
 })
 
-Tabs.Details:AddSection("Obstáculos")
-
-local ObstacleDetailParagraph = Tabs.Details:AddParagraph({
-    Title = "🚧 Detalles de Obstáculos",
-    Content = "Escanea el mapa primero"
-})
-
-Tabs.Details:AddButton({
-    Title = "🚧 Ver Obstáculos Detallados",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
-        else
-            ObstacleDetailParagraph:SetDesc(getDetailedObstacleReport())
-        end
-    end
-})
-
-Tabs.Details:AddSection("Zonas de Estacionamiento")
-
-local ParkingDetailParagraph = Tabs.Details:AddParagraph({
-    Title = "🅿️ Detalles de Parking",
-    Content = "Escanea el mapa primero"
-})
-
-Tabs.Details:AddButton({
-    Title = "🅿️ Ver Zonas Detalladas",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
-        else
-            ParkingDetailParagraph:SetDesc(getDetailedParkingReport())
-        end
-    end
-})
-
-Tabs.Details:AddSection("Scripts")
-
-local ScriptDetailParagraph = Tabs.Details:AddParagraph({
-    Title = "📜 Scripts Detectados",
-    Content = "Escanea el mapa primero"
-})
-
-Tabs.Details:AddButton({
-    Title = "📜 Ver Scripts",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
-        else
-            ScriptDetailParagraph:SetDesc(getScriptReport())
-        end
-    end
-})
-
-Tabs.Details:AddButton({
-    Title = "📜 Copiar Scripts Completos",
-    Description = "Exporta TODOS los scripts con rutas",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
-        else
-            setclipboard(getFullScriptExport())
+local PlayerDropdown = Tabs.Players:AddDropdown("PlayerSelect", {
+    Title = "Select Player",
+    Values = getPlayerList(),
+    Default = 1,
+    Callback = function(Value)
+        selectedPlayer = getPlayerByName(Value)
+        if selectedPlayer then
             Fluent:Notify({
-                Title = "✅ Scripts Exportados!",
-                Content = string.format("%d scripts con rutas completas", #scannedData.scripts),
-                Duration = 3
-            })
-        end
-    end
-})
-
-Tabs.Details:AddSection("Análisis Avanzado")
-
-Tabs.Details:AddButton({
-    Title = "🔍 Copiar Datos RAW (JSON)",
-    Description = "Exporta datos sin formato para análisis",
-    Callback = function()
-        if scanStats.lastScan == "Never" then
-            Fluent:Notify({Title = "⚠️ Aviso", Content = "Escanea primero!", Duration = 2})
-        else
-            local rawData = string.format(
-                "{\n" ..
-                '  "obstacles": %d,\n' ..
-                '  "parkingZones": %d,\n' ..
-                '  "vehicles": %d,\n' ..
-                '  "scripts": %d,\n' ..
-                '  "checkpoints": %d,\n' ..
-                '  "collectibles": %d,\n' ..
-                '  "totalObjects": %d,\n' ..
-                '  "scanTime": %s\n' ..
-                "}",
-                #scannedData.obstacles,
-                #scannedData.parkingZones,
-                #scannedData.vehicles,
-                #scannedData.scripts,
-                #scannedData.checkpoints,
-                #scannedData.collectibles,
-                scanStats.totalObjects,
-                scanStats.scanTime
-            )
-            setclipboard(rawData)
-            Fluent:Notify({
-                Title = "✅ JSON Copiado!",
-                Content = "Datos en formato JSON",
+                Title = "✅ Selected",
+                Content = selectedPlayer.Name,
                 Duration = 2
             })
+        end
+    end
+})
+
+Tabs.Players:AddButton({
+    Title = "🔄 Refresh List",
+    Callback = function()
+        PlayerDropdown:SetValues(getPlayerList())
+        Fluent:Notify({
+            Title = "✅ Refreshed",
+            Content = "Player list updated",
+            Duration = 2
+        })
+    end
+})
+
+Tabs.Players:AddSection("Teleport")
+
+Tabs.Players:AddButton({
+    Title = "📍 Teleport to Player",
+    Callback = function()
+        if selectedPlayer and selectedPlayer.Character then
+            local targetRoot = selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local myRoot = getRoot()
+            if targetRoot and myRoot then
+                myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                Fluent:Notify({
+                    Title = "✅ Teleported",
+                    Content = "To " .. selectedPlayer.Name,
+                    Duration = 2
+                })
+            end
+        else
+            Fluent:Notify({
+                Title = "❌ Error",
+                Content = "No player selected!",
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Players:AddSection("Bring Player")
+
+Tabs.Players:AddButton({
+    Title = "🧲 Bring Player Once",
+    Description = "Teleport player to you (one time)",
+    Callback = function()
+        if selectedPlayer then
+            bringPlayer(selectedPlayer)
+        else
+            Fluent:Notify({
+                Title = "❌ Error",
+                Content = "No player selected!",
+                Duration = 2
+            })
+        end
+    end
+})
+
+local BringLoopToggle = Tabs.Players:AddToggle("BringLoop", {
+    Title = "🔄 Bring Player (Loop)",
+    Description = "Keep player near you",
+    Default = false,
+    Callback = function(Value)
+        bringEnabled = Value
+        
+        if Value then
+            if not selectedPlayer then
+                Fluent:Notify({
+                    Title = "❌ Error",
+                    Content = "Select a player first!",
+                    Duration = 2
+                })
+                BringLoopToggle:SetValue(false)
+                return
+            end
+            
+            Fluent:Notify({
+                Title = "🧲 Bring Loop ON",
+                Content = selectedPlayer.Name .. " stuck to you!",
+                Duration = 2
+            })
+            startBringLoop()
+        else
+            stopBringLoop()
+            Fluent:Notify({
+                Title = "Bring Loop OFF",
+                Content = "",
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Players:AddSlider("BringSpeed", {
+    Title = "Bring Speed",
+    Description = "Lower = Faster updates",
+    Default = 0.5,
+    Min = 0.1,
+    Max = 2,
+    Rounding = 1,
+    Callback = function(Value)
+        bringSpeed = Value
+    end
+})
+
+Tabs.Players:AddSection("Camera")
+
+Tabs.Players:AddButton({
+    Title = "👁️ View Player",
+    Callback = function()
+        if selectedPlayer and selectedPlayer.Character then
+            Workspace.CurrentCamera.CameraSubject = selectedPlayer.Character
+        end
+    end
+})
+
+Tabs.Players:AddButton({
+    Title = "🔙 View Self",
+    Callback = function()
+        local char = getChar()
+        if char then
+            Workspace.CurrentCamera.CameraSubject = char
+        end
+    end
+})
+
+-- ═══════════════════════════════════════
+-- ⚔️ COMBAT TAB
+-- ═══════════════════════════════════════
+
+Tabs.Combat:AddParagraph({
+    Title = "⚔️ Combat System",
+    Content = "Kill aura and hitbox tools"
+})
+
+local KillAuraToggle = Tabs.Combat:AddToggle("KillAura", {
+    Title = "💀 Kill Aura",
+    Description = "Auto hit nearby players",
+    Default = false,
+    Callback = function(Value)
+        killAuraEnabled = Value
+        
+        if Value then
+            Fluent:Notify({
+                Title = "💀 Kill Aura ON",
+                Content = "Hitting players in range",
+                Duration = 2
+            })
+            task.spawn(killAuraLoop)
+        else
+            Fluent:Notify({
+                Title = "Kill Aura OFF",
+                Content = "",
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Combat:AddSlider("KillAuraRange", {
+    Title = "Kill Aura Range",
+    Description = "Attack range in studs",
+    Default = 20,
+    Min = 5,
+    Max = 50,
+    Rounding = 0,
+    Callback = function(Value)
+        killAuraRange = Value
+    end
+})
+
+Tabs.Combat:AddSlider("KillAuraSpeed", {
+    Title = "Attack Speed",
+    Description = "Lower = Faster",
+    Default = 0.1,
+    Min = 0.05,
+    Max = 1,
+    Rounding = 2,
+    Callback = function(Value)
+        killAuraSpeed = Value
+    end
+})
+
+Tabs.Combat:AddSection("Manual Hit")
+
+Tabs.Combat:AddButton({
+    Title = "👊 Hit Selected Player",
+    Description = "One-time hit on selected player",
+    Callback = function()
+        if selectedPlayer then
+            hitPlayer(selectedPlayer)
+            Fluent:Notify({
+                Title = "💥 Hit!",
+                Content = "Attacked " .. selectedPlayer.Name,
+                Duration = 2
+            })
+        else
+            Fluent:Notify({
+                Title = "❌ Error",
+                Content = "No player selected!",
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tabs.Combat:AddSection("Hitbox Expander")
+
+local hitboxEnabled = false
+local hitboxSize = 10
+
+Tabs.Combat:AddToggle("HitboxToggle", {
+    Title = "📦 Hitbox Expander",
+    Default = false,
+    Callback = function(Value)
+        hitboxEnabled = Value
+    end
+})
+
+Tabs.Combat:AddSlider("HitboxSize", {
+    Title = "Hitbox Size",
+    Default = 10,
+    Min = 5,
+    Max = 25,
+    Rounding = 0,
+    Callback = function(Value)
+        hitboxSize = Value
+    end
+})
+
+-- ═══════════════════════════════════════
+-- 👁️ VISUAL TAB
+-- ═══════════════════════════════════════
+
+Tabs.Visual:AddParagraph({
+    Title = "👁️ ESP System",
+    Content = "See players through walls"
+})
+
+Tabs.Visual:AddToggle("ESPToggle", {
+    Title = "👁️ Enable ESP",
+    Default = false,
+    Callback = function(Value)
+        espEnabled = Value
+        updateAllESP()
+    end
+})
+
+Tabs.Visual:AddToggle("ShowHealth", {
+    Title = "❤️ Show Health",
+    Default = true,
+    Callback = function(Value)
+        espConfig.showHealth = Value
+    end
+})
+
+Tabs.Visual:AddToggle("ShowDistance", {
+    Title = "📏 Show Distance",
+    Default = true,
+    Callback = function(Value)
+        espConfig.showDistance = Value
+    end
+})
+
+Tabs.Visual:AddSection("Lighting")
+
+Tabs.Visual:AddToggle("Fullbright", {
+    Title = "💡 Fullbright",
+    Default = false,
+    Callback = function(Value)
+        local Lighting = game:GetService("Lighting")
+        if Value then
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 14
+            Lighting.FogEnd = 100000
+            Lighting.GlobalShadows = false
+        else
+            Lighting.Brightness = 1
+            Lighting.ClockTime = 12
+            Lighting.GlobalShadows = true
         end
     end
 })
@@ -826,27 +800,218 @@ Tabs.Settings:AddButton({
     end
 })
 
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetFolder("GFHub")
+SaveManager:SetFolder("GFHub/configs")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
 Tabs.Settings:AddSection("Info")
 
 Tabs.Settings:AddParagraph({
-    Title = "👤 Parking Game Scanner v1.0",
-    Content = "Created by: Gael Fonzar\nTheme: Dark + Red\nStatus: ✅ Loaded\n\nEste scanner detecta:\n• Obstáculos y barreras\n• Zonas de estacionamiento\n• Vehículos\n• Coleccionables\n• Scripts ocultos\n• Y mucho más!"
+    Title = "👤 GF HUB v4.0",
+    Content = "Created by: Gael Fonzar\nTheme: Dark + Red\nStatus: ✅ Loaded"
 })
+
+-- ═══════════════════════════════════════
+-- 🔄 LOOPS
+-- ═══════════════════════════════════════
+
+connections.Fly = RunService.Heartbeat:Connect(function()
+    if not flyEnabled then return end
+    local root = getRoot()
+    if not root then return end
+    local bv = root:FindFirstChild("GF_Fly")
+    local bg = root:FindFirstChild("GF_Gyro")
+    if bv and bg then
+        local cam = Workspace.CurrentCamera.CFrame
+        local move = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0, 1, 0) end
+        bv.Velocity = move * flySpeed
+        bg.CFrame = cam
+    end
+end)
+
+connections.Speed = RunService.Heartbeat:Connect(function()
+    if not speedEnabled then return end
+    local hum = getHumanoid()
+    if hum then hum.WalkSpeed = walkSpeed end
+end)
+
+connections.Noclip = RunService.Stepped:Connect(function()
+    if not noclipEnabled then return end
+    local char = getChar()
+    if char then
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+connections.InfJump = UserInputService.JumpRequest:Connect(function()
+    if not infJumpEnabled then return end
+    local hum = getHumanoid()
+    if hum then
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+connections.Hitbox = RunService.Heartbeat:Connect(function()
+    for _, target in pairs(Players:GetPlayers()) do
+        if target ~= player and target.Character then
+            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot then
+                if hitboxEnabled then
+                    if not hitboxCache[target.Name] then
+                        hitboxCache[target.Name] = {
+                            size = targetRoot.Size,
+                            trans = targetRoot.Transparency,
+                            cancol = targetRoot.CanCollide
+                        }
+                    end
+                    targetRoot.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                    targetRoot.Transparency = 0.7
+                    targetRoot.Color = Color3.fromRGB(255, 0, 0)
+                    targetRoot.CanCollide = false
+                else
+                    if hitboxCache[target.Name] then
+                        targetRoot.Size = hitboxCache[target.Name].size
+                        targetRoot.Transparency = hitboxCache[target.Name].trans
+                        targetRoot.CanCollide = hitboxCache[target.Name].cancol
+                        hitboxCache[target.Name] = nil
+                    end
+                end
+            end
+        end
+    end
+end)
+
+connections.ESPUpdate = RunService.RenderStepped:Connect(function()
+    updateESPInfo()
+end)
+
+-- Player Events
+Players.PlayerAdded:Connect(function(newPlayer)
+    task.wait(1)
+    if espEnabled and newPlayer ~= player then
+        createESP(newPlayer)
+    end
+    PlayerDropdown:SetValues(getPlayerList())
+end)
+
+Players.PlayerRemoving:Connect(function(removedPlayer)
+    removeESP(removedPlayer)
+    PlayerDropdown:SetValues(getPlayerList())
+end)
+
+-- Character Respawn
+player.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    
+    if speedEnabled then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = walkSpeed
+        end
+    end
+    
+    if bringEnabled then
+        stopBringLoop()
+    end
+    
+    if killAuraEnabled then
+        killAuraEnabled = false
+    end
+end)
+
+-- Cleanup
+local function cleanup()
+    stopBringLoop()
+    killAuraEnabled = false
+    
+    for name, connection in pairs(connections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    
+    for _, target in pairs(Players:GetPlayers()) do
+        removeESP(target)
+    end
+    
+    local char = getChar()
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = 16
+        end
+        
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+        
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
+            if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
+            root.Velocity = Vector3.new(0, 0, 0)
+        end
+    end
+    
+    for _, target in pairs(Players:GetPlayers()) do
+        if target ~= player and target.Character then
+            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot and hitboxCache[target.Name] then
+                targetRoot.Size = hitboxCache[target.Name].size
+                targetRoot.Transparency = hitboxCache[target.Name].trans
+                targetRoot.CanCollide = hitboxCache[target.Name].cancol
+            end
+        end
+    end
+    
+    local Lighting = game:GetService("Lighting")
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 12
+    Lighting.GlobalShadows = true
+    
+    Fluent:Notify({
+        Title = "👋 Unloaded",
+        Content = "GF HUB removed",
+        Duration = 2
+    })
+end
+
+Window:OnUnload(cleanup)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:LoadAutoloadConfig()
 
 -- Final notification
 Fluent:Notify({
-    Title = "🔍 Scanner Loaded",
-    Content = "Presiona 'Escanear Mapa' para comenzar\nRightShift para abrir/cerrar",
+    Title = "🎮 GF HUB v4.0",
+    Content = "Dark Theme Edition\nPress RightShift to toggle",
     Duration = 4
 })
 
 print("════════════════════════════════")
-print("🔍 Parking Game Scanner v1.0")
+print("🎮 GF HUB v4.0 - Dark Theme")
 print("Created by: Gael Fonzar")
+print("Theme: Black + Red Accent")
 print("Features:")
-print("• Escaneo completo del mapa")
-print("• Detección de obstáculos")
-print("• Análisis de zonas de parking")
-print("• Detección de scripts")
+print("• Bring Player to You")
+print("• Kill Aura System")
+print("• One-Hit Kill")
+print("• Hitbox Expander")
+print("• ESP System")
 print("Press RightShift to open")
 print("════════════════════════════════")
