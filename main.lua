@@ -1,6 +1,6 @@
 --[[
     ═══════════════════════════════════════
-    🔍 PARK A CAR - MINI SCANNER
+    🔍 PARK A AR - MINI SCANNER
     ═══════════════════════════════════════
     Escanea y muestra TODO lo coleccionable
     by Gael Fonzar
