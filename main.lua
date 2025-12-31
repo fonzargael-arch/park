@@ -2,7 +2,7 @@
     ═══════════════════════════════════════
     🍬 PARK A CAR - AUTO FARM (WORKING)
     ═══════════════════════════════════════
-    Auto recolecta candies por Touch
+    Auto recolecta candies por Touc
     by Gael Fonzar
     
     LOADSTRING:
