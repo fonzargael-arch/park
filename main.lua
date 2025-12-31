@@ -1,9 +1,12 @@
 --[[
     ═══════════════════════════════════════
-    🍬 PARK A CAR - AUTO FARM CANDIES
+    🍬 PARK A CAR - AUTO FARM CANDIES V2
     ═══════════════════════════════════════
     Auto recolecta candies automáticamente
     by Gael Fonzar
+    
+    LOADSTRING:
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/fonzargael-arch/park/main/main.lua"))()
     ═══════════════════════════════════════
 ]]
 
@@ -11,6 +14,7 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
@@ -20,8 +24,8 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 -- Variables
 local autoFarmEnabled = false
 local candyESPEnabled = false
-local collectRadius = 50
-local teleportSpeed = 0.1
+local collectRadius = 100
+local teleportDelay = 0.2
 
 local candiesCollected = 0
 local candyMarkers = {}
@@ -30,39 +34,50 @@ local candyMarkers = {}
 local candyColor = Color3.fromRGB(255, 105, 180)
 
 -- ═══════════════════════════════════════
--- 🍬 CANDY FINDER
+-- 🔍 DETECTAR ESTRUCTURA DEL JUEGO
+-- ═══════════════════════════════════════
+
+local function debugWorkspace()
+    print("═══════════════════════════════════")
+    print("🔍 DEBUG: Escaneando Workspace...")
+    print("═══════════════════════════════════")
+    
+    for _, child in pairs(Workspace:GetChildren()) do
+        print("📁 Workspace." .. child.Name .. " (" .. child.ClassName .. ")")
+    end
+    
+    print("═══════════════════════════════════")
+end
+
+-- ═══════════════════════════════════════
+-- 🍬 CANDY FINDER - MEJORADO
 -- ═══════════════════════════════════════
 
 local function findCandies()
     local candies = {}
     
-    -- Buscar en diferentes ubicaciones posibles
-    local searchLocations = {
-        Workspace,
-        Workspace:FindFirstChild("Candies"),
-        Workspace:FindFirstChild("Candy"),
-        Workspace:FindFirstChild("Items"),
-        Workspace:FindFirstChild("Collectibles")
-    }
-    
-    for _, location in pairs(searchLocations) do
-        if location then
-            for _, obj in pairs(location:GetDescendants()) do
-                local name = obj.Name:lower()
+    -- Buscar en TODO el Workspace recursivamente
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") or obj:IsA("Model") then
+            local name = obj.Name:lower()
+            
+            -- Buscar objetos coleccionables
+            local isCandy = name:find("candy") or 
+                          name:find("coin") or 
+                          name:find("collect") or
+                          name:find("sweet") or
+                          name:find("prize") or
+                          name:find("reward") or
+                          name:find("pickup")
+            
+            if isCandy then
+                -- Verificar que tenga algún método de interacción
+                local hasClick = obj:FindFirstChildWhichIsA("ClickDetector", true)
+                local hasProximity = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                local hasTouchInterest = obj:FindFirstChildWhichIsA("TouchTransmitter", true)
                 
-                -- Buscar por nombre común de candies
-                if (obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") or obj:IsA("Model")) and 
-                   (name:find("candy") or name:find("sweet") or name:find("coin") or name:find("collect")) then
-                    
-                    -- Verificar que tenga ClickDetector o ProximityPrompt
-                    local hasInteraction = obj:FindFirstChildOfClass("ClickDetector") or 
-                                          obj:FindFirstChildOfClass("ProximityPrompt") or
-                                          obj:FindFirstChild("ClickDetector") or
-                                          obj:FindFirstChild("ProximityPrompt")
-                    
-                    if hasInteraction or obj:IsA("Model") then
-                        table.insert(candies, obj)
-                    end
+                if hasClick or hasProximity or hasTouchInterest or obj.CanTouch then
+                    table.insert(candies, obj)
                 end
             end
         end
@@ -76,141 +91,136 @@ end
 -- ═══════════════════════════════════════
 
 local function createCandyMarker(candy)
-    if candy:FindFirstChild("CANDY_MARKER") then return end
-    
-    local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
-    if not candyPart then return end
-    
-    -- Highlight
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "CANDY_MARKER"
-    highlight.Parent = candy
-    highlight.FillColor = candyColor
-    highlight.OutlineColor = candyColor
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    
-    -- Billboard con distancia
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "CANDY_BILLBOARD"
-    billboard.Parent = candyPart
-    billboard.AlwaysOnTop = true
-    billboard.Size = UDim2.new(0, 100, 0, 40)
-    billboard.StudsOffset = Vector3.new(0, 2, 0)
-    
-    local frame = Instance.new("Frame")
-    frame.Parent = billboard
-    frame.BackgroundTransparency = 1
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    
-    local candyLabel = Instance.new("TextLabel")
-    candyLabel.Parent = frame
-    candyLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    candyLabel.BackgroundTransparency = 1
-    candyLabel.TextColor3 = candyColor
-    candyLabel.TextStrokeTransparency = 0
-    candyLabel.Font = Enum.Font.GothamBold
-    candyLabel.TextSize = 14
-    candyLabel.Text = "🍬"
-    
-    local distLabel = Instance.new("TextLabel")
-    distLabel.Parent = frame
-    distLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    distLabel.Position = UDim2.new(0, 0, 0.5, 0)
-    distLabel.BackgroundTransparency = 1
-    distLabel.TextColor3 = Color3.new(1, 1, 1)
-    distLabel.TextStrokeTransparency = 0
-    distLabel.Font = Enum.Font.Gotham
-    distLabel.TextSize = 12
-    
-    -- Update distancia
-    task.spawn(function()
-        while distLabel.Parent and candyPart.Parent do
-            task.wait(0.5)
-            
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local dist = (candyPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
-                distLabel.Text = math.floor(dist) .. "m"
-            end
-        end
+    pcall(function()
+        if candy:FindFirstChild("CANDY_MARKER") then return end
+        
+        local candyPart = candy:IsA("Model") and (candy.PrimaryPart or candy:FindFirstChildWhichIsA("BasePart")) or candy
+        if not candyPart or not candyPart:IsA("BasePart") then return end
+        
+        -- Highlight
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "CANDY_MARKER"
+        highlight.Parent = candy
+        highlight.FillColor = candyColor
+        highlight.OutlineColor = candyColor
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Adornee = candy
+        
+        -- Billboard
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "CANDY_BILLBOARD"
+        billboard.Parent = candyPart
+        billboard.AlwaysOnTop = true
+        billboard.Size = UDim2.new(0, 100, 0, 50)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Parent = billboard
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = candyColor
+        textLabel.TextStrokeTransparency = 0
+        textLabel.Font = Enum.Font.GothamBold
+        textLabel.TextSize = 14
+        textLabel.Text = "🍬 CANDY"
+        
+        table.insert(candyMarkers, candy)
     end)
-    
-    table.insert(candyMarkers, candy)
 end
 
 local function enableCandyESP()
     candyESPEnabled = true
     
-    local candies = findCandies()
-    
-    for _, candy in pairs(candies) do
-        createCandyMarker(candy)
-    end
+    task.spawn(function()
+        while candyESPEnabled do
+            local candies = findCandies()
+            
+            for _, candy in pairs(candies) do
+                if candy.Parent then
+                    createCandyMarker(candy)
+                end
+            end
+            
+            task.wait(2)
+        end
+    end)
 end
 
 local function disableCandyESP()
     candyESPEnabled = false
     
     for _, candy in pairs(candyMarkers) do
-        if candy and candy.Parent then
-            local marker = candy:FindFirstChild("CANDY_MARKER")
-            local billboard = candy:FindFirstChild("CANDY_BILLBOARD")
-            if marker then marker:Destroy() end
-            if billboard then billboard:Destroy() end
-        end
+        pcall(function()
+            if candy and candy.Parent then
+                local marker = candy:FindFirstChild("CANDY_MARKER")
+                local billboard = candy:FindFirstChild("CANDY_BILLBOARD")
+                if marker then marker:Destroy() end
+                if billboard then billboard:Destroy() end
+            end
+        end)
     end
     candyMarkers = {}
 end
 
-local function updateCandyESP()
-    disableCandyESP()
-    task.wait(0.2)
-    if candyESPEnabled then
-        enableCandyESP()
-    end
-end
-
 -- ═══════════════════════════════════════
--- 🚀 AUTO FARM
+-- 🚀 AUTO FARM - MÉTODO UNIVERSAL
 -- ═══════════════════════════════════════
 
-local function collectCandy(candy)
-    if not candy or not candy.Parent then return false end
+local function tryCollectCandy(candy)
+    local success = false
     
-    local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
-    if not candyPart then return false end
+    pcall(function()
+        if not candy or not candy.Parent then return end
+        
+        local char = player.Character
+        if not char then return end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        
+        -- Obtener la parte principal
+        local candyPart = candy:IsA("Model") and (candy.PrimaryPart or candy:FindFirstChildWhichIsA("BasePart")) or candy
+        if not candyPart or not candyPart:IsA("BasePart") then return end
+        
+        -- Guardar posición original
+        local originalCFrame = hrp.CFrame
+        
+        -- Teleport cerca del candy
+        hrp.CFrame = candyPart.CFrame + Vector3.new(0, 5, 0)
+        task.wait(0.05)
+        
+        -- Método 1: ClickDetector
+        local clickDetector = candy:FindFirstChildWhichIsA("ClickDetector", true)
+        if clickDetector then
+            fireclickdetector(clickDetector)
+            success = true
+        end
+        
+        -- Método 2: ProximityPrompt
+        local proximityPrompt = candy:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if proximityPrompt then
+            fireproximityprompt(proximityPrompt)
+            success = true
+        end
+        
+        -- Método 3: Touch (para candies que se activan por toque)
+        if candyPart.CanTouch then
+            hrp.CFrame = candyPart.CFrame
+            task.wait(0.1)
+            success = true
+        end
+        
+        -- Método 4: Tocar físicamente
+        firetouchinterest(hrp, candyPart, 0)
+        task.wait(0.05)
+        firetouchinterest(hrp, candyPart, 1)
+        success = true
+        
+        task.wait(teleportDelay)
+    end)
     
-    local char = player.Character
-    if not char then return false end
-    
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    
-    -- Teleport al candy
-    local originalCFrame = hrp.CFrame
-    hrp.CFrame = candyPart.CFrame + Vector3.new(0, 3, 0)
-    
-    task.wait(teleportSpeed)
-    
-    -- Intentar activar ClickDetector
-    local clickDetector = candy:FindFirstChildOfClass("ClickDetector") or 
-                         candyPart:FindFirstChildOfClass("ClickDetector")
-    
-    if clickDetector then
-        fireclickdetector(clickDetector)
-    end
-    
-    -- Intentar activar ProximityPrompt
-    local proximityPrompt = candy:FindFirstChildOfClass("ProximityPrompt") or 
-                           candyPart:FindFirstChildOfClass("ProximityPrompt")
-    
-    if proximityPrompt then
-        fireproximityprompt(proximityPrompt)
-    end
-    
-    task.wait(0.1)
-    
-    return true
+    return success
 end
 
 local function autoFarmLoop()
@@ -225,39 +235,40 @@ local function autoFarmLoop()
         end
         
         -- Ordenar por distancia
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local hrp = player.Character.HumanoidRootPart
-            
-            table.sort(candies, function(a, b)
-                local aPart = a:IsA("Model") and a.PrimaryPart or a
-                local bPart = b:IsA("Model") and b.PrimaryPart or b
+        pcall(function()
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local hrp = player.Character.HumanoidRootPart
                 
-                if not aPart or not bPart then return false end
-                
-                local distA = (aPart.Position - hrp.Position).Magnitude
-                local distB = (bPart.Position - hrp.Position).Magnitude
-                
-                return distA < distB
-            end)
-            
-            -- Recolectar candies dentro del radio
-            for _, candy in pairs(candies) do
-                if not autoFarmEnabled then break end
-                
-                local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
-                if candyPart then
-                    local dist = (candyPart.Position - hrp.Position).Magnitude
+                table.sort(candies, function(a, b)
+                    local aPart = a:IsA("Model") and (a.PrimaryPart or a:FindFirstChildWhichIsA("BasePart")) or a
+                    local bPart = b:IsA("Model") and (b.PrimaryPart or b:FindFirstChildWhichIsA("BasePart")) or b
                     
-                    if dist <= collectRadius then
-                        local success = collectCandy(candy)
-                        if success then
-                            candiesCollected = candiesCollected + 1
-                            task.wait(teleportSpeed)
+                    if not aPart or not bPart then return false end
+                    
+                    local distA = (aPart.Position - hrp.Position).Magnitude
+                    local distB = (bPart.Position - hrp.Position).Magnitude
+                    
+                    return distA < distB
+                end)
+                
+                -- Recolectar candies
+                for _, candy in pairs(candies) do
+                    if not autoFarmEnabled then break end
+                    
+                    local candyPart = candy:IsA("Model") and (candy.PrimaryPart or candy:FindFirstChildWhichIsA("BasePart")) or candy
+                    
+                    if candyPart and candyPart:IsA("BasePart") then
+                        local dist = (candyPart.Position - hrp.Position).Magnitude
+                        
+                        if dist <= collectRadius then
+                            if tryCollectCandy(candy) then
+                                candiesCollected = candiesCollected + 1
+                            end
                         end
                     end
                 end
             end
-        end
+        end)
     end
 end
 
@@ -275,7 +286,7 @@ end
 -- ═══════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "🍬 Park A Car - Auto Farm",
+    Name = "🍬 Park A Car - Auto Farm V2",
     LoadingTitle = "Cargando...",
     LoadingSubtitle = "by Gael Fonzar",
     ConfigurationSaving = {
@@ -298,14 +309,14 @@ FarmTab:CreateToggle({
             enableAutoFarm()
             Rayfield:Notify({
                 Title = "Auto Farm", 
-                Content = "Activado - Recolectando candies", 
+                Content = "✅ Farmeo activado", 
                 Duration = 3
             })
         else
             disableAutoFarm()
             Rayfield:Notify({
                 Title = "Auto Farm", 
-                Content = "Desactivado", 
+                Content = "❌ Desactivado", 
                 Duration = 2
             })
         end
@@ -314,9 +325,9 @@ FarmTab:CreateToggle({
 
 FarmTab:CreateSlider({
     Name = "Collect Radius",
-    Range = {10, 200},
-    Increment = 5,
-    CurrentValue = 50,
+    Range = {20, 300},
+    Increment = 10,
+    CurrentValue = 100,
     Flag = "CollectRadius",
     Callback = function(v)
         collectRadius = v
@@ -324,33 +335,23 @@ FarmTab:CreateSlider({
 })
 
 FarmTab:CreateSlider({
-    Name = "Teleport Speed",
-    Range = {0, 1},
+    Name = "Teleport Delay",
+    Range = {0.1, 1},
     Increment = 0.05,
-    CurrentValue = 0.1,
-    Flag = "TeleportSpeed",
+    CurrentValue = 0.2,
+    Flag = "TeleportDelay",
     Callback = function(v)
-        teleportSpeed = v
+        teleportDelay = v
     end
 })
 
-FarmTab:CreateLabel("Candies Collected: 0")
+local statsLabel = FarmTab:CreateLabel("Candies: 0")
 
--- Actualizar contador
 task.spawn(function()
-    while true do
-        task.wait(1)
-        
-        -- Buscar el label y actualizarlo
-        for _, tab in pairs(Window.Tabs) do
-            if tab.Name == "🍬 Auto Farm" then
-                for _, element in pairs(tab.Elements) do
-                    if element.Type == "Label" and element.Name:find("Candies") then
-                        element:Set("Candies Collected: " .. candiesCollected)
-                    end
-                end
-            end
-        end
+    while task.wait(1) do
+        pcall(function()
+            statsLabel:Set("Candies Collected: " .. candiesCollected)
+        end)
     end
 end)
 
@@ -358,31 +359,42 @@ FarmTab:CreateButton({
     Name = "🔄 Reset Counter",
     Callback = function()
         candiesCollected = 0
-        Rayfield:Notify({Title = "Counter", Content = "Reseteado", Duration = 2})
+        Rayfield:Notify({Title = "Reset", Content = "Contador en 0", Duration = 2})
     end
 })
 
 -- ESP TAB
-local ESPTab = Window:CreateTab("👁️ Candy ESP", 4483362458)
+local ESPTab = Window:CreateTab("👁️ ESP", 4483362458)
 
 ESPTab:CreateToggle({
-    Name = "👁️ Enable Candy ESP",
+    Name = "👁️ Candy ESP",
     CurrentValue = false,
     Flag = "CandyESP",
     Callback = function(v)
         if v then
             enableCandyESP()
-            Rayfield:Notify({Title = "ESP", Content = "Activado", Duration = 2})
+            Rayfield:Notify({Title = "ESP", Content = "✅ Activado", Duration = 2})
         else
             disableCandyESP()
+            Rayfield:Notify({Title = "ESP", Content = "❌ Desactivado", Duration = 2})
         end
+    end
+})
+
+ESPTab:CreateButton({
+    Name = "🔍 Debug Workspace",
+    Callback = function()
+        debugWorkspace()
+        Rayfield:Notify({Title = "Debug", Content = "Revisa la consola F9", Duration = 3})
     end
 })
 
 ESPTab:CreateButton({
     Name = "🔄 Refresh ESP",
     Callback = function()
-        updateCandyESP()
+        disableCandyESP()
+        task.wait(0.3)
+        enableCandyESP()
         Rayfield:Notify({Title = "ESP", Content = "Actualizado", Duration = 2})
     end
 })
@@ -391,7 +403,7 @@ ESPTab:CreateButton({
 local MiscTab = Window:CreateTab("⚙️ Misc", 4483362458)
 
 MiscTab:CreateButton({
-    Name = "🔄 Rejoin Server",
+    Name = "🔄 Rejoin",
     Callback = function()
         game:GetService("TeleportService"):Teleport(game.PlaceId, player)
     end
@@ -406,16 +418,22 @@ MiscTab:CreateButton({
     end
 })
 
-MiscTab:CreateLabel("🍬 Auto Farm Candies")
-MiscTab:CreateLabel("⚡ Teleport instantáneo")
-MiscTab:CreateLabel("✅ ESP incluido")
+MiscTab:CreateLabel("✅ V2 - Universal candy detector")
+MiscTab:CreateLabel("🔍 Busca en todo el Workspace")
+MiscTab:CreateLabel("⚡ 4 métodos de colección")
 
--- Success
+-- Notificación final
 Rayfield:Notify({
     Title = "✅ Loaded!",
-    Content = "Park A Car Auto Farm listo",
+    Content = "Auto Farm V2 - Método universal",
     Duration = 5
 })
 
-print("✅ Park A Car - Auto Farm Candies loaded!")
-print("🍬 Recolección automática activada")
+print("═══════════════════════════════════")
+print("✅ Park A Car Auto Farm V2")
+print("🍬 Método universal de detección")
+print("═══════════════════════════════════")
+
+-- Auto-debug al cargar
+task.wait(2)
+debugWorkspace()
