@@ -2,7 +2,7 @@
     ═══════════════════════════════════════
     🍬 PARK A CAR - AUTO FARM (WORKING)
     ═══════════════════════════════════════
-    Auto recolecta candies por Touc
+    Auto recolecta candies por Touch
     by Gael Fonzar
     
     LOADSTRING:
@@ -23,7 +23,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 -- Variables
 local autoFarmEnabled = false
 local candyESPEnabled = false
-local collectRadius = 150
+local collectRadius = 500
 local teleportDelay = 0.15
 local useInstantTP = true
 
@@ -298,9 +298,9 @@ FarmTab:CreateToggle({
 
 FarmTab:CreateSlider({
     Name = "Collect Radius",
-    Range = {50, 500},
-    Increment = 10,
-    CurrentValue = 150,
+    Range = {100, 2000},
+    Increment = 50,
+    CurrentValue = 500,
     Flag = "CollectRadius",
     Callback = function(v)
         collectRadius = v
