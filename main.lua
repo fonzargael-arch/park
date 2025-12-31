@@ -1,892 +1,352 @@
 --[[
     ═══════════════════════════════════════
-    🎮 GF HUB - Universal Script v4.0
+    🍬 PARK A CAR - AUTO FARM CANDIES
     ═══════════════════════════════════════
-    Created by: Gael Fonzar
-    Theme: Black + Red Accent
-    Features: Bring Player, Kill Aura, Hit
+    Auto recolecta candies automáticamente
+    by Gael Fonzar
     ═══════════════════════════════════════
 ]]
 
--- Load Fluent Library
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
-
 -- Services
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 
+-- Load UI
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
 -- Variables
-local selectedPlayer = nil
-local espEnabled = false
-local espObjects = {}
-local espConfig = {
-    fillColor = Color3.fromRGB(255, 0, 0),
-    outlineColor = Color3.fromRGB(255, 255, 255),
-    fillTransparency = 0.5,
-    outlineTransparency = 0,
-    showHealth = true,
-    showDistance = true
-}
+local autoFarmEnabled = false
+local candyESPEnabled = false
+local collectRadius = 50
+local teleportSpeed = 0.1
 
-local connections = {}
-local hitboxCache = {}
+local candiesCollected = 0
+local candyMarkers = {}
 
--- Bring Player Variables
-local bringEnabled = false
-local bringLoop = false
-local bringSpeed = 0.5
+-- Colors
+local candyColor = Color3.fromRGB(255, 105, 180)
 
--- Kill Aura Variables
-local killAuraEnabled = false
-local killAuraRange = 20
-local killAuraSpeed = 0.1
+-- ═══════════════════════════════════════
+-- 🍬 CANDY FINDER
+-- ═══════════════════════════════════════
 
--- Helper Functions
-local function getChar()
-    return player.Character
-end
-
-local function getRoot()
-    local char = getChar()
-    return char and char:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHumanoid()
-    local char = getChar()
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
-
--- Enhanced ESP System
-local function createESP(target)
-    if not target or not target.Character then return end
+local function findCandies()
+    local candies = {}
     
-    if espObjects[target.Name] then
-        pcall(function() 
-            if espObjects[target.Name].highlight then
-                espObjects[target.Name].highlight:Destroy()
-            end
-            if espObjects[target.Name].billboard then
-                espObjects[target.Name].billboard:Destroy()
-            end
-        end)
-    end
-    
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "GF_ESP"
-    highlight.Adornee = target.Character
-    highlight.FillColor = espConfig.fillColor
-    highlight.OutlineColor = espConfig.outlineColor
-    highlight.FillTransparency = espConfig.fillTransparency
-    highlight.OutlineTransparency = espConfig.outlineTransparency
-    highlight.Parent = target.Character
-    
-    local head = target.Character:FindFirstChild("Head")
-    if not head then return end
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "GF_ESPInfo"
-    billboard.Adornee = head
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Parent = head
-    
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = target.Name
-    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameLabel.TextStrokeTransparency = 0.5
-    nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextSize = 14
-    nameLabel.Parent = billboard
-    
-    local healthLabel = Instance.new("TextLabel")
-    healthLabel.Size = UDim2.new(1, 0, 0.3, 0)
-    healthLabel.Position = UDim2.new(0, 0, 0.35, 0)
-    healthLabel.BackgroundTransparency = 1
-    healthLabel.Text = "HP: 100"
-    healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-    healthLabel.TextStrokeTransparency = 0.5
-    healthLabel.Font = Enum.Font.Gotham
-    healthLabel.TextSize = 12
-    healthLabel.Visible = espConfig.showHealth
-    healthLabel.Parent = billboard
-    
-    local distanceLabel = Instance.new("TextLabel")
-    distanceLabel.Size = UDim2.new(1, 0, 0.3, 0)
-    distanceLabel.Position = UDim2.new(0, 0, 0.65, 0)
-    distanceLabel.BackgroundTransparency = 1
-    distanceLabel.Text = "0 studs"
-    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-    distanceLabel.TextStrokeTransparency = 0.5
-    distanceLabel.Font = Enum.Font.Gotham
-    distanceLabel.TextSize = 12
-    distanceLabel.Visible = espConfig.showDistance
-    distanceLabel.Parent = billboard
-    
-    espObjects[target.Name] = {
-        highlight = highlight,
-        billboard = billboard,
-        healthLabel = healthLabel,
-        distanceLabel = distanceLabel
+    -- Buscar en diferentes ubicaciones posibles
+    local searchLocations = {
+        Workspace,
+        Workspace:FindFirstChild("Candies"),
+        Workspace:FindFirstChild("Candy"),
+        Workspace:FindFirstChild("Items"),
+        Workspace:FindFirstChild("Collectibles")
     }
-end
-
-local function removeESP(target)
-    if espObjects[target.Name] then
-        pcall(function() 
-            if espObjects[target.Name].highlight then
-                espObjects[target.Name].highlight:Destroy()
-            end
-            if espObjects[target.Name].billboard then
-                espObjects[target.Name].billboard:Destroy()
-            end
-        end)
-        espObjects[target.Name] = nil
-    end
-end
-
-local function updateAllESP()
-    for _, target in pairs(Players:GetPlayers()) do
-        if target ~= player then
-            if espEnabled then
-                createESP(target)
-            else
-                removeESP(target)
-            end
-        end
-    end
-end
-
-local function updateESPInfo()
-    if not espEnabled then return end
     
-    local myRoot = getRoot()
-    if not myRoot then return end
-    
-    for _, target in pairs(Players:GetPlayers()) do
-        if target ~= player and espObjects[target.Name] then
-            local espData = espObjects[target.Name]
-            
-            if target.Character then
-                local targetHum = target.Character:FindFirstChildOfClass("Humanoid")
-                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    for _, location in pairs(searchLocations) do
+        if location then
+            for _, obj in pairs(location:GetDescendants()) do
+                local name = obj.Name:lower()
                 
-                if targetHum and espData.healthLabel then
-                    local health = math.floor(targetHum.Health)
-                    local maxHealth = math.floor(targetHum.MaxHealth)
-                    espData.healthLabel.Text = "HP: " .. health .. "/" .. maxHealth
+                -- Buscar por nombre común de candies
+                if (obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") or obj:IsA("Model")) and 
+                   (name:find("candy") or name:find("sweet") or name:find("coin") or name:find("collect")) then
                     
-                    local healthPercent = health / maxHealth
-                    if healthPercent > 0.6 then
-                        espData.healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-                    elseif healthPercent > 0.3 then
-                        espData.healthLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-                    else
-                        espData.healthLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                    -- Verificar que tenga ClickDetector o ProximityPrompt
+                    local hasInteraction = obj:FindFirstChildOfClass("ClickDetector") or 
+                                          obj:FindFirstChildOfClass("ProximityPrompt") or
+                                          obj:FindFirstChild("ClickDetector") or
+                                          obj:FindFirstChild("ProximityPrompt")
+                    
+                    if hasInteraction or obj:IsA("Model") then
+                        table.insert(candies, obj)
                     end
-                    
-                    espData.healthLabel.Visible = espConfig.showHealth
-                end
-                
-                if targetRoot and espData.distanceLabel then
-                    local distance = math.floor((myRoot.Position - targetRoot.Position).Magnitude)
-                    espData.distanceLabel.Text = distance .. " studs"
-                    espData.distanceLabel.Visible = espConfig.showDistance
                 end
             end
         end
     end
+    
+    return candies
 end
 
-local function getPlayerList()
-    local list = {}
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= player then
-            table.insert(list, p.Name)
-        end
-    end
-    return list
-end
+-- ═══════════════════════════════════════
+-- 🎯 CANDY ESP
+-- ═══════════════════════════════════════
 
-local function getPlayerByName(name)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p.Name == name then
-            return p
-        end
-    end
-    return nil
-end
-
--- BRING PLAYER TO YOU
-local function bringPlayer(target)
-    if not target or not target.Character then
-        Fluent:Notify({
-            Title = "❌ Error",
-            Content = "Player not found!",
-            Duration = 2
-        })
-        return
-    end
+local function createCandyMarker(candy)
+    if candy:FindFirstChild("CANDY_MARKER") then return end
     
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    local myRoot = getRoot()
+    local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
+    if not candyPart then return end
     
-    if not targetRoot or not myRoot then return end
+    -- Highlight
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "CANDY_MARKER"
+    highlight.Parent = candy
+    highlight.FillColor = candyColor
+    highlight.OutlineColor = candyColor
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
     
-    -- Teleport player to you
-    targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
+    -- Billboard con distancia
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "CANDY_BILLBOARD"
+    billboard.Parent = candyPart
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 100, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, 2, 0)
     
-    Fluent:Notify({
-        Title = "✅ Brought",
-        Content = target.Name .. " teleported to you!",
-        Duration = 2
-    })
-end
-
-local function startBringLoop()
-    bringLoop = true
+    local frame = Instance.new("Frame")
+    frame.Parent = billboard
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(1, 0, 1, 0)
     
+    local candyLabel = Instance.new("TextLabel")
+    candyLabel.Parent = frame
+    candyLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    candyLabel.BackgroundTransparency = 1
+    candyLabel.TextColor3 = candyColor
+    candyLabel.TextStrokeTransparency = 0
+    candyLabel.Font = Enum.Font.GothamBold
+    candyLabel.TextSize = 14
+    candyLabel.Text = "🍬"
+    
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Parent = frame
+    distLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    distLabel.BackgroundTransparency = 1
+    distLabel.TextColor3 = Color3.new(1, 1, 1)
+    distLabel.TextStrokeTransparency = 0
+    distLabel.Font = Enum.Font.Gotham
+    distLabel.TextSize = 12
+    
+    -- Update distancia
     task.spawn(function()
-        while bringLoop and bringEnabled and selectedPlayer do
-            if selectedPlayer and selectedPlayer.Character then
-                local targetRoot = selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
-                local myRoot = getRoot()
-                
-                if targetRoot and myRoot then
-                    targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
-                end
-            end
+        while distLabel.Parent and candyPart.Parent do
+            task.wait(0.5)
             
-            task.wait(bringSpeed)
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local dist = (candyPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+                distLabel.Text = math.floor(dist) .. "m"
+            end
         end
     end)
+    
+    table.insert(candyMarkers, candy)
 end
 
-local function stopBringLoop()
-    bringLoop = false
-    bringEnabled = false
+local function enableCandyESP()
+    candyESPEnabled = true
+    
+    local candies = findCandies()
+    
+    for _, candy in pairs(candies) do
+        createCandyMarker(candy)
+    end
 end
 
--- KILL AURA SYSTEM
-local function hitPlayer(target)
-    if not target or not target.Character then return end
+local function disableCandyESP()
+    candyESPEnabled = false
     
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    local targetHum = target.Character:FindFirstChildOfClass("Humanoid")
-    local myRoot = getRoot()
+    for _, candy in pairs(candyMarkers) do
+        if candy and candy.Parent then
+            local marker = candy:FindFirstChild("CANDY_MARKER")
+            local billboard = candy:FindFirstChild("CANDY_BILLBOARD")
+            if marker then marker:Destroy() end
+            if billboard then billboard:Destroy() end
+        end
+    end
+    candyMarkers = {}
+end
+
+local function updateCandyESP()
+    disableCandyESP()
+    task.wait(0.2)
+    if candyESPEnabled then
+        enableCandyESP()
+    end
+end
+
+-- ═══════════════════════════════════════
+-- 🚀 AUTO FARM
+-- ═══════════════════════════════════════
+
+local function collectCandy(candy)
+    if not candy or not candy.Parent then return false end
     
-    if not targetRoot or not targetHum or not myRoot then return end
+    local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
+    if not candyPart then return false end
     
-    -- Check if in range
-    local distance = (myRoot.Position - targetRoot.Position).Magnitude
-    if distance > killAuraRange then return end
+    local char = player.Character
+    if not char then return false end
     
-    -- Method 1: Teleport behind and hit
-    local originalPos = myRoot.CFrame
-    myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
     
-    task.wait(0.05)
+    -- Teleport al candy
+    local originalCFrame = hrp.CFrame
+    hrp.CFrame = candyPart.CFrame + Vector3.new(0, 3, 0)
     
-    -- Simulate punch/hit
-    local tool = player.Character:FindFirstChildOfClass("Tool")
-    if tool then
-        tool:Activate()
+    task.wait(teleportSpeed)
+    
+    -- Intentar activar ClickDetector
+    local clickDetector = candy:FindFirstChildOfClass("ClickDetector") or 
+                         candyPart:FindFirstChildOfClass("ClickDetector")
+    
+    if clickDetector then
+        fireclickdetector(clickDetector)
     end
     
-    task.wait(0.05)
-    myRoot.CFrame = originalPos
+    -- Intentar activar ProximityPrompt
+    local proximityPrompt = candy:FindFirstChildOfClass("ProximityPrompt") or 
+                           candyPart:FindFirstChildOfClass("ProximityPrompt")
+    
+    if proximityPrompt then
+        fireproximityprompt(proximityPrompt)
+    end
+    
+    task.wait(0.1)
+    
+    return true
 end
 
-local function killAuraLoop()
-    while killAuraEnabled do
-        for _, target in pairs(Players:GetPlayers()) do
-            if target ~= player and target.Character then
-                local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-                local myRoot = getRoot()
+local function autoFarmLoop()
+    while autoFarmEnabled do
+        task.wait(0.5)
+        
+        local candies = findCandies()
+        
+        if #candies == 0 then
+            task.wait(2)
+            continue
+        end
+        
+        -- Ordenar por distancia
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = player.Character.HumanoidRootPart
+            
+            table.sort(candies, function(a, b)
+                local aPart = a:IsA("Model") and a.PrimaryPart or a
+                local bPart = b:IsA("Model") and b.PrimaryPart or b
                 
-                if targetRoot and myRoot then
-                    local distance = (myRoot.Position - targetRoot.Position).Magnitude
+                if not aPart or not bPart then return false end
+                
+                local distA = (aPart.Position - hrp.Position).Magnitude
+                local distB = (bPart.Position - hrp.Position).Magnitude
+                
+                return distA < distB
+            end)
+            
+            -- Recolectar candies dentro del radio
+            for _, candy in pairs(candies) do
+                if not autoFarmEnabled then break end
+                
+                local candyPart = candy:IsA("Model") and candy.PrimaryPart or candy
+                if candyPart then
+                    local dist = (candyPart.Position - hrp.Position).Magnitude
                     
-                    if distance <= killAuraRange then
-                        hitPlayer(target)
+                    if dist <= collectRadius then
+                        local success = collectCandy(candy)
+                        if success then
+                            candiesCollected = candiesCollected + 1
+                            task.wait(teleportSpeed)
+                        end
                     end
                 end
             end
         end
-        
-        task.wait(killAuraSpeed)
     end
 end
 
--- Create Window with Dark Theme
-local Window = Fluent:CreateWindow({
-    Title = "🎮 GF HUB v4.0",
-    SubTitle = "by Gael Fonzar",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 480),
-    Acrylic = false, -- Disable for solid black
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.RightShift
+local function enableAutoFarm()
+    autoFarmEnabled = true
+    task.spawn(autoFarmLoop)
+end
+
+local function disableAutoFarm()
+    autoFarmEnabled = false
+end
+
+-- ═══════════════════════════════════════
+-- 🎨 GUI
+-- ═══════════════════════════════════════
+
+local Window = Rayfield:CreateWindow({
+    Name = "🍬 Park A Car - Auto Farm",
+    LoadingTitle = "Cargando...",
+    LoadingSubtitle = "by Gael Fonzar",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "ParkACarHub",
+        FileName = "Config"
+    },
+    KeySystem = false
 })
 
--- Apply Custom Dark Theme (Black + Red)
-pcall(function()
-    local gui = game:GetService("CoreGui"):FindFirstChild("FluentUI") or player.PlayerGui:FindFirstChild("FluentUI")
-    if gui then
-        for _, obj in pairs(gui:GetDescendants()) do
-            -- Make background pure black
-            if obj:IsA("Frame") or obj:IsA("ScrollingFrame") then
-                obj.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            end
-            
-            -- Make accent colors red
-            if obj:IsA("TextButton") or obj:IsA("ImageButton") then
-                obj.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-            end
-            
-            -- Red text accents
-            if obj:IsA("TextLabel") and obj.Name:find("Title") then
-                obj.TextColor3 = Color3.fromRGB(255, 50, 50)
-            end
+-- AUTO FARM TAB
+local FarmTab = Window:CreateTab("🍬 Auto Farm", 4483362458)
+
+FarmTab:CreateToggle({
+    Name = "🍬 Enable Auto Farm",
+    CurrentValue = false,
+    Flag = "AutoFarm",
+    Callback = function(v)
+        if v then
+            enableAutoFarm()
+            Rayfield:Notify({
+                Title = "Auto Farm", 
+                Content = "Activado - Recolectando candies", 
+                Duration = 3
+            })
+        else
+            disableAutoFarm()
+            Rayfield:Notify({
+                Title = "Auto Farm", 
+                Content = "Desactivado", 
+                Duration = 2
+            })
         end
     end
-end)
-
--- Create Tabs
-local Tabs = {
-    Main = Window:AddTab({ Title = "🏠 Main", Icon = "home" }),
-    Movement = Window:AddTab({ Title = "🚀 Movement", Icon = "wind" }),
-    Players = Window:AddTab({ Title = "👥 Players", Icon = "users" }),
-    Combat = Window:AddTab({ Title = "⚔️ Combat", Icon = "sword" }),
-    Visual = Window:AddTab({ Title = "👁️ Visual", Icon = "eye" }),
-    Settings = Window:AddTab({ Title = "⚙️ Settings", Icon = "settings" })
-}
-
--- ═══════════════════════════════════════
--- 🏠 MAIN TAB
--- ═══════════════════════════════════════
-
-Tabs.Main:AddParagraph({
-    Title = "🎮 Welcome to GF HUB v4.0!",
-    Content = "Dark Theme Edition\n\nNew Features:\n• Bring Player to You\n• Kill Aura\n• One-Hit Kill\n• Black + Red Theme"
 })
 
--- ═══════════════════════════════════════
--- 🚀 MOVEMENT TAB
--- ═══════════════════════════════════════
+FarmTab:CreateSlider({
+    Name = "Collect Radius",
+    Range = {10, 200},
+    Increment = 5,
+    CurrentValue = 50,
+    Flag = "CollectRadius",
+    Callback = function(v)
+        collectRadius = v
+    end
+})
 
-local flyEnabled = false
-local flySpeed = 100
-local speedEnabled = false
-local walkSpeed = 16
-local infJumpEnabled = false
-local noclipEnabled = false
+FarmTab:CreateSlider({
+    Name = "Teleport Speed",
+    Range = {0, 1},
+    Increment = 0.05,
+    CurrentValue = 0.1,
+    Flag = "TeleportSpeed",
+    Callback = function(v)
+        teleportSpeed = v
+    end
+})
 
-local FlyToggle = Tabs.Movement:AddToggle("FlyToggle", {
-    Title = "✈️ Fly Mode",
-    Description = "Fly using WASD + Space/Shift",
-    Default = false,
-    Callback = function(Value)
-        flyEnabled = Value
-        local root = getRoot()
+FarmTab:CreateLabel("Candies Collected: 0")
+
+-- Actualizar contador
+task.spawn(function()
+    while true do
+        task.wait(1)
         
-        if Value and root then
-            if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
-            if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
-            
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "GF_Fly"
-            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-            bv.Velocity = Vector3.zero
-            bv.Parent = root
-            
-            local bg = Instance.new("BodyGyro")
-            bg.Name = "GF_Gyro"
-            bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-            bg.P = 9e4
-            bg.Parent = root
-            
-            Fluent:Notify({
-                Title = "✈️ Fly ON",
-                Content = "Use WASD + Space/Shift",
-                Duration = 2
-            })
-        else
-            if root then
-                if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
-                if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
-            end
-        end
-    end
-})
-
-Tabs.Movement:AddSlider("FlySpeed", {
-    Title = "Fly Speed",
-    Default = 100,
-    Min = 10,
-    Max = 300,
-    Rounding = 0,
-    Callback = function(Value)
-        flySpeed = Value
-    end
-})
-
-Tabs.Movement:AddSection("Walking")
-
-Tabs.Movement:AddToggle("SpeedToggle", {
-    Title = "🏃 Custom Speed",
-    Default = false,
-    Callback = function(Value)
-        speedEnabled = Value
-        if not Value then
-            local hum = getHumanoid()
-            if hum then hum.WalkSpeed = 16 end
-        end
-    end
-})
-
-Tabs.Movement:AddSlider("WalkSpeed", {
-    Title = "Walk Speed",
-    Default = 16,
-    Min = 16,
-    Max = 300,
-    Rounding = 0,
-    Callback = function(Value)
-        walkSpeed = Value
-    end
-})
-
-Tabs.Movement:AddSection("Other")
-
-Tabs.Movement:AddToggle("InfJump", {
-    Title = "♾️ Infinite Jump",
-    Default = false,
-    Callback = function(Value)
-        infJumpEnabled = Value
-    end
-})
-
-Tabs.Movement:AddToggle("Noclip", {
-    Title = "👻 Noclip",
-    Default = false,
-    Callback = function(Value)
-        noclipEnabled = Value
-    end
-})
-
--- ═══════════════════════════════════════
--- 👥 PLAYERS TAB
--- ═══════════════════════════════════════
-
-Tabs.Players:AddParagraph({
-    Title = "👥 Player Control",
-    Content = "Select and control other players"
-})
-
-local PlayerDropdown = Tabs.Players:AddDropdown("PlayerSelect", {
-    Title = "Select Player",
-    Values = getPlayerList(),
-    Default = 1,
-    Callback = function(Value)
-        selectedPlayer = getPlayerByName(Value)
-        if selectedPlayer then
-            Fluent:Notify({
-                Title = "✅ Selected",
-                Content = selectedPlayer.Name,
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Players:AddButton({
-    Title = "🔄 Refresh List",
-    Callback = function()
-        PlayerDropdown:SetValues(getPlayerList())
-        Fluent:Notify({
-            Title = "✅ Refreshed",
-            Content = "Player list updated",
-            Duration = 2
-        })
-    end
-})
-
-Tabs.Players:AddSection("Teleport")
-
-Tabs.Players:AddButton({
-    Title = "📍 Teleport to Player",
-    Callback = function()
-        if selectedPlayer and selectedPlayer.Character then
-            local targetRoot = selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local myRoot = getRoot()
-            if targetRoot and myRoot then
-                myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
-                Fluent:Notify({
-                    Title = "✅ Teleported",
-                    Content = "To " .. selectedPlayer.Name,
-                    Duration = 2
-                })
-            end
-        else
-            Fluent:Notify({
-                Title = "❌ Error",
-                Content = "No player selected!",
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Players:AddSection("Bring Player")
-
-Tabs.Players:AddButton({
-    Title = "🧲 Bring Player Once",
-    Description = "Teleport player to you (one time)",
-    Callback = function()
-        if selectedPlayer then
-            bringPlayer(selectedPlayer)
-        else
-            Fluent:Notify({
-                Title = "❌ Error",
-                Content = "No player selected!",
-                Duration = 2
-            })
-        end
-    end
-})
-
-local BringLoopToggle = Tabs.Players:AddToggle("BringLoop", {
-    Title = "🔄 Bring Player (Loop)",
-    Description = "Keep player near you",
-    Default = false,
-    Callback = function(Value)
-        bringEnabled = Value
-        
-        if Value then
-            if not selectedPlayer then
-                Fluent:Notify({
-                    Title = "❌ Error",
-                    Content = "Select a player first!",
-                    Duration = 2
-                })
-                BringLoopToggle:SetValue(false)
-                return
-            end
-            
-            Fluent:Notify({
-                Title = "🧲 Bring Loop ON",
-                Content = selectedPlayer.Name .. " stuck to you!",
-                Duration = 2
-            })
-            startBringLoop()
-        else
-            stopBringLoop()
-            Fluent:Notify({
-                Title = "Bring Loop OFF",
-                Content = "",
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Players:AddSlider("BringSpeed", {
-    Title = "Bring Speed",
-    Description = "Lower = Faster updates",
-    Default = 0.5,
-    Min = 0.1,
-    Max = 2,
-    Rounding = 1,
-    Callback = function(Value)
-        bringSpeed = Value
-    end
-})
-
-Tabs.Players:AddSection("Camera")
-
-Tabs.Players:AddButton({
-    Title = "👁️ View Player",
-    Callback = function()
-        if selectedPlayer and selectedPlayer.Character then
-            Workspace.CurrentCamera.CameraSubject = selectedPlayer.Character
-        end
-    end
-})
-
-Tabs.Players:AddButton({
-    Title = "🔙 View Self",
-    Callback = function()
-        local char = getChar()
-        if char then
-            Workspace.CurrentCamera.CameraSubject = char
-        end
-    end
-})
-
--- ═══════════════════════════════════════
--- ⚔️ COMBAT TAB
--- ═══════════════════════════════════════
-
-Tabs.Combat:AddParagraph({
-    Title = "⚔️ Combat System",
-    Content = "Kill aura and hitbox tools"
-})
-
-local KillAuraToggle = Tabs.Combat:AddToggle("KillAura", {
-    Title = "💀 Kill Aura",
-    Description = "Auto hit nearby players",
-    Default = false,
-    Callback = function(Value)
-        killAuraEnabled = Value
-        
-        if Value then
-            Fluent:Notify({
-                Title = "💀 Kill Aura ON",
-                Content = "Hitting players in range",
-                Duration = 2
-            })
-            task.spawn(killAuraLoop)
-        else
-            Fluent:Notify({
-                Title = "Kill Aura OFF",
-                Content = "",
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Combat:AddSlider("KillAuraRange", {
-    Title = "Kill Aura Range",
-    Description = "Attack range in studs",
-    Default = 20,
-    Min = 5,
-    Max = 50,
-    Rounding = 0,
-    Callback = function(Value)
-        killAuraRange = Value
-    end
-})
-
-Tabs.Combat:AddSlider("KillAuraSpeed", {
-    Title = "Attack Speed",
-    Description = "Lower = Faster",
-    Default = 0.1,
-    Min = 0.05,
-    Max = 1,
-    Rounding = 2,
-    Callback = function(Value)
-        killAuraSpeed = Value
-    end
-})
-
-Tabs.Combat:AddSection("Manual Hit")
-
-Tabs.Combat:AddButton({
-    Title = "👊 Hit Selected Player",
-    Description = "One-time hit on selected player",
-    Callback = function()
-        if selectedPlayer then
-            hitPlayer(selectedPlayer)
-            Fluent:Notify({
-                Title = "💥 Hit!",
-                Content = "Attacked " .. selectedPlayer.Name,
-                Duration = 2
-            })
-        else
-            Fluent:Notify({
-                Title = "❌ Error",
-                Content = "No player selected!",
-                Duration = 2
-            })
-        end
-    end
-})
-
-Tabs.Combat:AddSection("Hitbox Expander")
-
-local hitboxEnabled = false
-local hitboxSize = 10
-
-Tabs.Combat:AddToggle("HitboxToggle", {
-    Title = "📦 Hitbox Expander",
-    Default = false,
-    Callback = function(Value)
-        hitboxEnabled = Value
-    end
-})
-
-Tabs.Combat:AddSlider("HitboxSize", {
-    Title = "Hitbox Size",
-    Default = 10,
-    Min = 5,
-    Max = 25,
-    Rounding = 0,
-    Callback = function(Value)
-        hitboxSize = Value
-    end
-})
-
--- ═══════════════════════════════════════
--- 👁️ VISUAL TAB
--- ═══════════════════════════════════════
-
-Tabs.Visual:AddParagraph({
-    Title = "👁️ ESP System",
-    Content = "See players through walls"
-})
-
-Tabs.Visual:AddToggle("ESPToggle", {
-    Title = "👁️ Enable ESP",
-    Default = false,
-    Callback = function(Value)
-        espEnabled = Value
-        updateAllESP()
-    end
-})
-
-Tabs.Visual:AddToggle("ShowHealth", {
-    Title = "❤️ Show Health",
-    Default = true,
-    Callback = function(Value)
-        espConfig.showHealth = Value
-    end
-})
-
-Tabs.Visual:AddToggle("ShowDistance", {
-    Title = "📏 Show Distance",
-    Default = true,
-    Callback = function(Value)
-        espConfig.showDistance = Value
-    end
-})
-
-Tabs.Visual:AddSection("Lighting")
-
-Tabs.Visual:AddToggle("Fullbright", {
-    Title = "💡 Fullbright",
-    Default = false,
-    Callback = function(Value)
-        local Lighting = game:GetService("Lighting")
-        if Value then
-            Lighting.Brightness = 2
-            Lighting.ClockTime = 14
-            Lighting.FogEnd = 100000
-            Lighting.GlobalShadows = false
-        else
-            Lighting.Brightness = 1
-            Lighting.ClockTime = 12
-            Lighting.GlobalShadows = true
-        end
-    end
-})
-
--- ═══════════════════════════════════════
--- ⚙️ SETTINGS TAB
--- ═══════════════════════════════════════
-
-Tabs.Settings:AddButton({
-    Title = "🗑️ Unload Script",
-    Callback = function()
-        Fluent:Destroy()
-    end
-})
-
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetFolder("GFHub")
-SaveManager:SetFolder("GFHub/configs")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-
-Tabs.Settings:AddSection("Info")
-
-Tabs.Settings:AddParagraph({
-    Title = "👤 GF HUB v4.0",
-    Content = "Created by: Gael Fonzar\nTheme: Dark + Red\nStatus: ✅ Loaded"
-})
-
--- ═══════════════════════════════════════
--- 🔄 LOOPS
--- ═══════════════════════════════════════
-
-connections.Fly = RunService.Heartbeat:Connect(function()
-    if not flyEnabled then return end
-    local root = getRoot()
-    if not root then return end
-    local bv = root:FindFirstChild("GF_Fly")
-    local bg = root:FindFirstChild("GF_Gyro")
-    if bv and bg then
-        local cam = Workspace.CurrentCamera.CFrame
-        local move = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cam.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cam.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cam.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cam.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0, 1, 0) end
-        bv.Velocity = move * flySpeed
-        bg.CFrame = cam
-    end
-end)
-
-connections.Speed = RunService.Heartbeat:Connect(function()
-    if not speedEnabled then return end
-    local hum = getHumanoid()
-    if hum then hum.WalkSpeed = walkSpeed end
-end)
-
-connections.Noclip = RunService.Stepped:Connect(function()
-    if not noclipEnabled then return end
-    local char = getChar()
-    if char then
-        for _, part in pairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
-    end
-end)
-
-connections.InfJump = UserInputService.JumpRequest:Connect(function()
-    if not infJumpEnabled then return end
-    local hum = getHumanoid()
-    if hum then
-        hum:ChangeState(Enum.HumanoidStateType.Jumping)
-    end
-end)
-
-connections.Hitbox = RunService.Heartbeat:Connect(function()
-    for _, target in pairs(Players:GetPlayers()) do
-        if target ~= player and target.Character then
-            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-            if targetRoot then
-                if hitboxEnabled then
-                    if not hitboxCache[target.Name] then
-                        hitboxCache[target.Name] = {
-                            size = targetRoot.Size,
-                            trans = targetRoot.Transparency,
-                            cancol = targetRoot.CanCollide
-                        }
-                    end
-                    targetRoot.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-                    targetRoot.Transparency = 0.7
-                    targetRoot.Color = Color3.fromRGB(255, 0, 0)
-                    targetRoot.CanCollide = false
-                else
-                    if hitboxCache[target.Name] then
-                        targetRoot.Size = hitboxCache[target.Name].size
-                        targetRoot.Transparency = hitboxCache[target.Name].trans
-                        targetRoot.CanCollide = hitboxCache[target.Name].cancol
-                        hitboxCache[target.Name] = nil
+        -- Buscar el label y actualizarlo
+        for _, tab in pairs(Window.Tabs) do
+            if tab.Name == "🍬 Auto Farm" then
+                for _, element in pairs(tab.Elements) do
+                    if element.Type == "Label" and element.Name:find("Candies") then
+                        element:Set("Candies Collected: " .. candiesCollected)
                     end
                 end
             end
@@ -894,124 +354,68 @@ connections.Hitbox = RunService.Heartbeat:Connect(function()
     end
 end)
 
-connections.ESPUpdate = RunService.RenderStepped:Connect(function()
-    updateESPInfo()
-end)
-
--- Player Events
-Players.PlayerAdded:Connect(function(newPlayer)
-    task.wait(1)
-    if espEnabled and newPlayer ~= player then
-        createESP(newPlayer)
+FarmTab:CreateButton({
+    Name = "🔄 Reset Counter",
+    Callback = function()
+        candiesCollected = 0
+        Rayfield:Notify({Title = "Counter", Content = "Reseteado", Duration = 2})
     end
-    PlayerDropdown:SetValues(getPlayerList())
-end)
-
-Players.PlayerRemoving:Connect(function(removedPlayer)
-    removeESP(removedPlayer)
-    PlayerDropdown:SetValues(getPlayerList())
-end)
-
--- Character Respawn
-player.CharacterAdded:Connect(function(char)
-    task.wait(1)
-    
-    if speedEnabled then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.WalkSpeed = walkSpeed
-        end
-    end
-    
-    if bringEnabled then
-        stopBringLoop()
-    end
-    
-    if killAuraEnabled then
-        killAuraEnabled = false
-    end
-end)
-
--- Cleanup
-local function cleanup()
-    stopBringLoop()
-    killAuraEnabled = false
-    
-    for name, connection in pairs(connections) do
-        if connection then
-            connection:Disconnect()
-        end
-    end
-    
-    for _, target in pairs(Players:GetPlayers()) do
-        removeESP(target)
-    end
-    
-    local char = getChar()
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.WalkSpeed = 16
-        end
-        
-        for _, part in pairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-        
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if root then
-            if root:FindFirstChild("GF_Fly") then root.GF_Fly:Destroy() end
-            if root:FindFirstChild("GF_Gyro") then root.GF_Gyro:Destroy() end
-            root.Velocity = Vector3.new(0, 0, 0)
-        end
-    end
-    
-    for _, target in pairs(Players:GetPlayers()) do
-        if target ~= player and target.Character then
-            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-            if targetRoot and hitboxCache[target.Name] then
-                targetRoot.Size = hitboxCache[target.Name].size
-                targetRoot.Transparency = hitboxCache[target.Name].trans
-                targetRoot.CanCollide = hitboxCache[target.Name].cancol
-            end
-        end
-    end
-    
-    local Lighting = game:GetService("Lighting")
-    Lighting.Brightness = 1
-    Lighting.ClockTime = 12
-    Lighting.GlobalShadows = true
-    
-    Fluent:Notify({
-        Title = "👋 Unloaded",
-        Content = "GF HUB removed",
-        Duration = 2
-    })
-end
-
-Window:OnUnload(cleanup)
-
-SaveManager:IgnoreThemeSettings()
-SaveManager:LoadAutoloadConfig()
-
--- Final notification
-Fluent:Notify({
-    Title = "🎮 GF HUB v4.0",
-    Content = "Dark Theme Edition\nPress RightShift to toggle",
-    Duration = 4
 })
 
-print("════════════════════════════════")
-print("🎮 GF HUB v4.0 - Dark Theme")
-print("Created by: Gael Fonzar")
-print("Theme: Black + Red Accent")
-print("Features:")
-print("• Bring Player to You")
-print("• Kill Aura System")
-print("• One-Hit Kill")
-print("• Hitbox Expander")
-print("• ESP System")
-print("Press RightShift to open")
-print("════════════════════════════════")
+-- ESP TAB
+local ESPTab = Window:CreateTab("👁️ Candy ESP", 4483362458)
+
+ESPTab:CreateToggle({
+    Name = "👁️ Enable Candy ESP",
+    CurrentValue = false,
+    Flag = "CandyESP",
+    Callback = function(v)
+        if v then
+            enableCandyESP()
+            Rayfield:Notify({Title = "ESP", Content = "Activado", Duration = 2})
+        else
+            disableCandyESP()
+        end
+    end
+})
+
+ESPTab:CreateButton({
+    Name = "🔄 Refresh ESP",
+    Callback = function()
+        updateCandyESP()
+        Rayfield:Notify({Title = "ESP", Content = "Actualizado", Duration = 2})
+    end
+})
+
+-- MISC TAB
+local MiscTab = Window:CreateTab("⚙️ Misc", 4483362458)
+
+MiscTab:CreateButton({
+    Name = "🔄 Rejoin Server",
+    Callback = function()
+        game:GetService("TeleportService"):Teleport(game.PlaceId, player)
+    end
+})
+
+MiscTab:CreateButton({
+    Name = "🗑️ Destroy GUI",
+    Callback = function()
+        disableAutoFarm()
+        disableCandyESP()
+        Rayfield:Destroy()
+    end
+})
+
+MiscTab:CreateLabel("🍬 Auto Farm Candies")
+MiscTab:CreateLabel("⚡ Teleport instantáneo")
+MiscTab:CreateLabel("✅ ESP incluido")
+
+-- Success
+Rayfield:Notify({
+    Title = "✅ Loaded!",
+    Content = "Park A Car Auto Farm listo",
+    Duration = 5
+})
+
+print("✅ Park A Car - Auto Farm Candies loaded!")
+print("🍬 Recolección automática activada")
